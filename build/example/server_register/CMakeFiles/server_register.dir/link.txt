@@ -1,0 +1,1 @@
+/usr/bin/c++ CMakeFiles/server_register.dir/src/server/main.cpp.o -o /home/yjj/learning/mrpc/bin/server_register  /usr/lib/x86_64-linux-gnu/libzookeeper_mt.so -lpthread 

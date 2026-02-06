@@ -1,0 +1,30 @@
+[info  26-02-02 19:40:56.225 85418 85418 server.hpp:74 run] server runing ...
+[info  26-02-02 19:40:56.225 85418 85418 server.hpp:38 do_accept] server listening on: 0.0.0.0:3333
+[trace 26-02-02 19:41:04.965 85418 85437 connection.hpp:466 operator()] recv type: 1048585 id: 12009794278491701261 req: 1 len: 3
+[trace 26-02-02 19:41:04.965 85418 85437 connection.hpp:722 invoke_callback] recv msg: test_add(M:12009794278491701261 R:1), content: [11,12]
+[debug 26-02-02 19:41:04.965 85418 85437 main.cpp:17 test_add] recv test add: 11 + 12
+[trace 26-02-02 19:41:04.965 85418 85437 connection.hpp:222 response] response, M:12009794278491701261 R:1: 23
+[trace 26-02-02 19:41:13.670 85418 85438 connection.hpp:466 operator()] recv type: 1048593 id: 12009794278491701261 req: 1 len: 3
+[trace 26-02-02 19:41:13.670 85418 85438 connection.hpp:722 invoke_callback] recv msg: test_add(M:12009794278491701261 R:1), content: [11,12]
+[debug 26-02-02 19:41:13.670 85418 85438 main.cpp:17 test_add] recv test add: 11 + 12
+[trace 26-02-02 19:41:13.670 85418 85438 connection.hpp:222 response] response, M:12009794278491701261 R:1: 23
+[trace 26-02-02 19:41:22.182 85418 85439 connection.hpp:466 operator()] recv type: 1048609 id: 12009794278491701261 req: 1 len: 3
+[trace 26-02-02 19:41:22.182 85418 85439 connection.hpp:722 invoke_callback] recv msg: test_add(M:12009794278491701261 R:1), content: [1,1]
+[debug 26-02-02 19:41:22.182 85418 85439 main.cpp:17 test_add] recv test add: 1 + 1
+[trace 26-02-02 19:41:22.182 85418 85439 connection.hpp:222 response] response, M:12009794278491701261 R:1: 2
+[trace 26-02-02 19:41:22.182 85418 85439 connection.hpp:466 operator()] recv type: 1048609 id: 12009794278491701261 req: 2 len: 3
+[trace 26-02-02 19:41:22.182 85418 85439 connection.hpp:722 invoke_callback] recv msg: test_add(M:12009794278491701261 R:2), content: [2,2]
+[debug 26-02-02 19:41:22.182 85418 85439 main.cpp:17 test_add] recv test add: 2 + 2
+[trace 26-02-02 19:41:22.182 85418 85439 connection.hpp:222 response] response, M:12009794278491701261 R:2: 4
+[trace 26-02-02 19:41:22.182 85418 85439 connection.hpp:466 operator()] recv type: 1048609 id: 12009794278491701261 req: 3 len: 3
+[trace 26-02-02 19:41:22.183 85418 85439 connection.hpp:722 invoke_callback] recv msg: test_add(M:12009794278491701261 R:3), content: [4,4]
+[debug 26-02-02 19:41:22.183 85418 85439 main.cpp:17 test_add] recv test add: 4 + 4
+[trace 26-02-02 19:41:22.183 85418 85439 connection.hpp:222 response] response, M:12009794278491701261 R:3: 8
+[trace 26-02-02 19:41:22.183 85418 85439 connection.hpp:466 operator()] recv type: 1048609 id: 12009794278491701261 req: 4 len: 3
+[trace 26-02-02 19:41:22.183 85418 85439 connection.hpp:722 invoke_callback] recv msg: test_add(M:12009794278491701261 R:4), content: [8,8]
+[debug 26-02-02 19:41:22.183 85418 85439 main.cpp:17 test_add] recv test add: 8 + 8
+[trace 26-02-02 19:41:22.183 85418 85439 connection.hpp:222 response] response, M:12009794278491701261 R:4: 16
+[trace 26-02-02 19:41:32.544 85418 85440 connection.hpp:466 operator()] recv type: 1048585 id: 13342045218919393930 req: 1 len: 3
+[error 26-02-02 19:41:32.544 85418 85440 router.hpp:223 route_request] rpc invoke not found, M:13342045218919393930 R:1 
+[trace 26-02-02 19:41:32.545 85418 85440 connection.hpp:327 async_call] async_call, query_funcname(M:11571538731729371113 R:1)
+[error 26-02-02 19:41:32.545 85418 85440 router.hpp:215 operator()] rpc invoke, M:13342045218919393930 R:1 throw exception: 501
