@@ -38,7 +38,7 @@ class server final : private asio::noncopyable {
         // 统一注册ZK节点
         std::string zk_node_path = "/mrpc/" + server_name_ + "/" + name;
         std::string zk_node_data = local_ip_ + ":" + std::to_string(local_port_);
-        zk_client_.create(zk_node_path, zk_node_data,0);
+        zk_client_.create(zk_node_path, zk_node_data, ZOO_EPHEMERAL);
     }
     
     /**
@@ -92,7 +92,11 @@ class server final : private asio::noncopyable {
         }
         is_running_ = true;
         LOG_INFO("server runing ...");
-    }
+
+
+        register_to_Zk();
+        // 你的服务节点路径，比如 /mrpc/test_server   
+ }
 
     void register_to_Zk() {
         if (is_registered_to_zk_) return; // prevent call repeated.

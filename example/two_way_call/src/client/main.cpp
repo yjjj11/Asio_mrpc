@@ -29,10 +29,7 @@ int main() {
              }
     });
 
-    auto conn = client.connect("127.0.0.1", 3333);
-    if (conn == nullptr) return 1;
-
-    auto ret = conn->call<uint32_t>("test_not_impl", 11, 12);
+    auto ret = client.call<uint32_t>("test_not_impl", 11, 12);
     if (ret.error_code() == mrpc::ok) {
         std::cout << "return: " << ret.value() << std::endl;
     } else {

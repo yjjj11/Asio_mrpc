@@ -8,18 +8,25 @@
 using namespace std::chrono_literals;
 using namespace mrpc;
 
-task<uint32_t> test_coro1(connection::cptr conn) {
-    auto ret =  conn->coro_call<int>("test_add", 1, 1);  // 1+1
-    auto ret1 =  conn->coro_call<int>("test_add", 2, 2); // 2+2
-    auto ret2 =  conn->coro_call<int>("test_add", 4, 4); // 4+4
-    double total=0;
+task<uint32_t> test_coro1() {
+    auto starts = std::chrono::steady_clock::now();
+    auto total = co_await client::get().coro_call<uint32_t>("test_mul", 4, 4);
+    auto ends = std::chrono::steady_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(ends - starts);
+    LOG_DEBUG("\ncoroutine1 total time: {} ms\n", duration.count());
 
-    total += (co_await ret).value();
-    total += (co_await ret1).value();
-    total += (co_await ret2).value();
+    co_return total.value(); // 16
+}
+task<uint32_t> test_coro2() {
+    auto starts = std::chrono::steady_clock::now();
+    auto total = co_await client::get().coro_call<uint32_t>("test_mul", 4, 4);
+     total = co_await client::get().coro_call<uint32_t>("test_mul", 4, 4);
+     total = co_await client::get().coro_call<uint32_t>("test_mul", 4, 4);    
+    auto ends = std::chrono::steady_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(ends - starts);
+    LOG_DEBUG("\ncoroutine2 total time: {} ms\n", duration.count());
 
-    LOG_DEBUG("coroutine final return: {}",total);
-    co_return total; // 16
+     co_return total.value(); // 16
 }
 int main() {
     wlog::logger::get().init("logs/" PROJECT_NAME ".log");
@@ -27,10 +34,26 @@ int main() {
 
     client::get().run();
 
-    auto conn = client::get().connect("127.0.0.1", 3333);
-    if (conn == nullptr) return 1;
+    // auto conn = client::get().connect("127.0.0.1", 3333);
+    // if (conn == nullptr) return 1;
 
-    test_coro1(conn);
+    // auto starts = std::chrono::steady_clock::now();
+    // test_coro1(conn);
+    // test_coro1(conn);
+    // test_coro1(conn);
+    // auto ends = std::chrono::steady_clock::now();
+    // auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(ends - starts);
+    // LOG_DEBUG("\ncoroutine total time: {} ms\n", duration.count());
+
+
+    auto starts = std::chrono::steady_clock::now();
+    test_coro2();
+    auto total = client::get().call<uint32_t>("test_mul", 4, 4);
+    total = client::get().call<uint32_t>("test_mul", 4, 4);
+    total = client::get().call<uint32_t>("test_mul", 4, 4);
+    auto ends = std::chrono::steady_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(ends - starts);
+    LOG_DEBUG("\ncoroutine total time: {} ms\n", duration.count());
 
     client::get().wait_shutdown();
 	wlog::logger::get().shutdown();

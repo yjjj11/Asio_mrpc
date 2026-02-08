@@ -1,87 +1,101 @@
-# mRPC
+# mRPC — 现代 C++ Header-only 双向 RPC 框架
 
-## 介绍
+一个短小精悍但功能完整的 RPC 框架，融合泛型编程、协程、异步网络 I/O 与服务治理能力。核心代码清晰易读，适合学习与生产演进。
 
-mRPC 是一个支持C++协程调用的轻量级、现代化的RPC库，它基于rest_rpc改造而来。与rest_rpc一样，它短小精悍所有核心代码不足千行，但却具备rpc的完整功能。得益于现代c++的高级功能，使得调用远程代码就像调用本地代码一样简单。与rest_rpc比较主要做了如下的修改：
+## 技术栈与关键技术
+- C++17/20 泛型编程与模板元编程：函数注册/反射调用、`function_traits`、`std::tuple`/`std::apply`、`if constexpr`
+- Asio 网络 I/O：Reactor 模型、`asio::io_context` 池、异步读写、定时器
+- C++20 协程：`co_await`、自定义 `task`/`promise`，以同步风格编写异步 RPC
+- 序列化协议：RAW、JSON、BJSON、UBJSON、MSGPACK、CBOR（基于 `nlohmann::json`）
+- ZooKeeper：服务注册与发现、Watcher 监听、客户端本地缓存
+- 日志：`spdlog`/`wlog` 集成
 
-    1. 支持协程调用
-    2. 服务端客户端地位平等，支持双向调用
-    3. 去掉调用过程中的异常处理（不喜欢每次调用都需要try...catch）
-    4. 自带支持更多的协议（RAW, JSON, BJSON, UBJSON, MSGPACK, CBOR）
-    5. 没有历史包袱，使用新的语言特性对代码做了优化
-    6. 支持日志打印
+## 架构与模块
+- Server：[server.hpp](include/mrpc/server.hpp) 服务端入口、`io_context` 池与线程池管理、统一函数注册封装、ZooKeeper 注册
+- Client：[client.hpp](include/mrpc/client.hpp) 客户端入口、对称的 `io_context` 管理、预留发现与缓存结构
+- Connection：[connection.hpp](include/mrpc/connection.hpp) Socket 封装、异步读写、发送队列、响应分发（Future/Callback/Coroutine）
+- Router：[router.hpp](include/mrpc/router.hpp) 路由与反射调用、异常回调、协议编解码
+- Coroutine：[coroutine.hpp](include/mrpc/coroutine.hpp) 自定义 `task`/`awaitable`，无缝协程调用
+- ZooKeeper 工具：[ZookeeperUtil.hpp](include/mrpc/ZookeeperUtil.hpp) 节点创建、数据读取、子节点列表与 Watcher、缓存与回调
 
-既然有了rest_rpc为什么还要重新造轮子呢？用别人的东西总有不顺手的地方比如rest_rpc中服务端不能直接调用客户端的方法，再比如现有工程中主要用nlohmann/json不想引入msgpack解析库，等等。但是最重要的是rest_rpc实在是太小巧了，千八百行的代码稍微花点时间便能理解其精要，重新开发个符合自己项目需求的RPC也不需要消耗太多的精力。所以本来都没打算给自己的这个库起名字，但为了搜索查找方便还是起了个叫mrpc, 为了方便记忆你可以把这里的 “m” 理解成micro或modern。其实我不太希望你直接用这个库，而是应该看下代码，了解原理后开发个符合自己需求的RPC（毕竟全部代码还不足千行）, 当然如果发现它完全满足自己的需求那就直接用吧:)。
+消息协议采用固定头（Header）+ 变长体（Body）：
+- Header：`msg_type | msg_id | req_id | body_len`
+- Body：按 `msg_type` 指定的序列化格式进行编解码
 
-代码虽少，但是绝对有值得学习的地方，特别是对现代c++知识的理解。这里要非常感谢rest_rpc的作者，通过对rest_rpc代码的阅读使我学习到了许多知识。
+## 功能特性
+- 双向 RPC：客户端与服务端地位对等，双方均可注册与被调用
+- 多调用风格：同步 `call`、Future 异步 `async_call`、回调异步、协程 `coro_call`、单向通知 `notify`
+- 多序列化：按需选择 RAW/JSON/BJSON/UBJSON/MSGPACK/CBOR
+- 服务治理：服务端接入 ZooKeeper 进行注册；客户端可读取服务/函数路径做发现与路由
+- 线程模型：`io_context` 池 + 工作线程（支持轮询分配），避免业务阻塞读写
 
-## 使用方法
+## 健壮性与性能
+- 发送队列串行化：确保同一连接的写操作顺序与线程安全
+- 上行/下行边界检查：消息长度校验、粘包处理、异常关闭统一收敛
+- 并发读优化：路由名映射采用共享锁，降低高并发场景中的锁竞争
+- 可观测性：统一日志等级与错误码
 
-mRPC和其依赖的第三方库都是是"Header only"的，所以只需要clone或下载include/rpc目录和依赖的third目录，然后如果是服务端只需添加：
+## 可扩展性
+- 注册中心抽象：当前接入 ZooKeeper，可平滑扩展到 etcd/Consul
+- 序列化抽象：在 Router 层封装编解码，支持替换更高性能的协议
+
+## 快速开始
+- 构建：见根目录 [CMakeLists.txt](CMakeLists.txt)，默认链接 `asio`、`nlohmann/json`、`spdlog`、`zookeeper_mt`（可选）
+- 示例：
+  - 同步调用：[block_call_client](example/block_call_client)
+  - 异步回调：[async_call_client](example/async_call_client)
+  - 协程调用：[coro_call_client](example/coro_call_client)
+  - 服务端注册与监听：[server_register](example/server_register)
+  - 双向 RPC：[two_way_call](example/two_way_call)
+
+## 代码示例
+服务端注册与 ZK 接入：
 ```cpp
-#include <mrpc/sever.hpp>
+auto& svr = mrpc::server::get();
+svr.set_ip_port("127.0.0.1", 3333);
+svr.set_server_name("test_server");
+svr.set_zk_ip_port("127.0.0.1", 2181);
+svr.run();
+svr.register_to_Zk();
+svr.reg_func("test_add", [](mrpc::connection::cptr conn, int i, int j) { return i + j; });
+svr.accept();
+svr.wait_shutdown();
 ```
-客户端添加：
+
+客户端同步调用：
 ```cpp
-#include <mrpc/client.hpp>
-```
-就可以了。
-
-
-### 服务注册
-
-```cpp
-// server
-server.router().reg_handle("test_add", [](connection::cptr conn, int i, int j) {
-    LOG_DEBUG("recv test add: {} + {}", i, j);
-    return i + j;
-});
+auto ret = conn->call<int>("test_add", 11, 12);
+if (ret.error_code() == mrpc::ok) { std::cout << ret.value() << std::endl; }
 ```
 
-### 同步调用
----
-
+客户端协程调用：
 ```cpp
-// client
-auto ret = conn->call<uint32_t>("test_add", 11, 12);
-if (ret.error_code() == mrpc::ok) {
-    std::cout << "return: " << ret.value() << std::endl;
-} else {
-    std::cout << "return error: " << ret.error_msg() << std::endl;
+task<int> t(mrpc::connection::cptr conn) {
+  auto r = co_await conn->coro_call<int>("test_add", 1, 1);
+  co_return r.value();
 }
 ```
 
-### 异步调用
----
-
-```cpp
-// client
-conn->async_call([](uint32_t err_code, const std::string& err_msg, const nlohmann::json& ret){
-    if (err_code == mrpc::ok) {
-        std::cout << "return: " << ret.get<uint32_t>() << std::endl;
-    } else {
-        std::cout << "return error: " << err_msg << std::endl;
-    }
-}, "test_add", 11, 12);
-```
-
-### 协程调用
----
-
-```cpp
-// client
-task<uint32_t> test_coro(connection::cptr conn) {
-    auto ret = co_await conn->coro_call<int>("test_add", 1, 1);  // 1+1
-    ret = co_await conn->coro_call<int>("test_add", ret.value(), ret.value()); // 2+2
-    ret = co_await conn->coro_call<int>("test_add", ret.value(), ret.value()); // 4+4
-    ret = co_await conn->coro_call<int>("test_add", ret.value(), ret.value()); // 8+8
-    co_return ret.value(); // 16
-}
-```
+## 学习收获
+- 现代 C++ 泛型编程与模板技巧：函数特征、参数解构、编译期条件,重中之重
+- 网络异步编程模型：Reactor、`io_context` 池化、队列化写、超时与错误处理
+- 协程工程化应用：自定义 awaitable/promise，与网络 I/O 协同 重中之重
+- 序列化协议设计与实现：多格式编解码、二进制/文本的取舍
+- 服务治理基础：注册/发现/Watcher、缓存一致性、负载与容错策略
 
 ## 依赖库
-
+ 
     1. asio 1.18
     2. nlohmann/json
     3. spdlog
+    4. zookeeper_mt（可选，用于服务注册与发现）
+
+## 目录结构
+- include/mrpc：核心头文件（Server/Client/Connection/Router/Coroutine/ZookeeperUtil）
+- example：示例程序（同步、异步、协程、服务注册、双向调用）
+- third：第三方依赖（asio、nlohmann/json、spdlog、wlog 等）
+- bin：构建输出
+
+## 致谢
+灵感来源于 `rest_rpc`，在其基础上以现代 C++ 技术栈重构并扩展了工程能力与生态集成。
 

@@ -1,11 +1,16 @@
 cmake_minimum_required(VERSION 3.6)
-project(server_register)
+# 项目名可自定义，不影响可执行程序生成
+project(test_servers)
 
-add_definitions(-DPROJECT_NAME="${PROJECT_NAME}" )
-include_directories( ${PROJECT_SOURCE_DIR}/src/ )
-file(GLOB SOURCE_FILES ./src/*.cpp ./src/*.h ./src/server/*.cpp ./src/server/*.h)
+include_directories(${PROJECT_SOURCE_DIR}/src)
 
-add_executable(${PROJECT_NAME} ${SOURCE_FILES})
+set(TEST_FILE1 ${PROJECT_SOURCE_DIR}/src/server/test_server.cpp)
+set(TEST_FILE2 ${PROJECT_SOURCE_DIR}/src/server/other_server.cpp)
+
+add_executable(test_server ${TEST_FILE1})
+add_executable(other_server ${TEST_FILE2})
+
 if(CMAKE_HOST_UNIX)
-    target_link_libraries(${PROJECT_NAME} pthread)
+    target_link_libraries(test_server pthread)
+    target_link_libraries(other_server pthread)
 endif()

@@ -6,6 +6,7 @@
 #include "router.hpp"
 #include <deque>
 #include <mutex>
+#include "function_traits.hpp"
 
 namespace mrpc {
 using namespace asio::ip;
@@ -15,7 +16,6 @@ class server;
 class client;
 class connection;
 struct awaitee;
-
 constexpr uint32_t MAX_MSG_SHRINK_LEN = 1024;		// 消息缓存大于此值做收缩
 constexpr uint32_t MAX_MSG_BODY_LEN = 1024*1024*8;  // 最大消息长度 8MB
 
@@ -269,6 +269,7 @@ class connection : public std::enable_shared_from_this<connection> {
     template<size_t TIMEOUT, typename RET = void, msg_type_fmt FMT = DEFAULT_MSG_FORMAT, typename... Args>
     req_result<RET> call(const std::string& rpc_name, Args&&...args) {
         auto [req_id, future] = async_call<FMT>(rpc_name, std::forward<Args>(args)...);
+        LOG_DEBUG("调用服务 {} 方法 {}", rpc_name, typeid(RET).name());
         auto status = future.wait_for(std::chrono::milliseconds(TIMEOUT));
         if (status == std::future_status::timeout || status == std::future_status::deferred) {
             {
@@ -682,6 +683,12 @@ task_awaitable<RET> coro_call(const std::string& rpc_name, Args&&...args) {
     void* user_data_ = nullptr;
 }; // class connection
 
+//特化模板，将connection::cptr识别为connection的智能指针类型
+template<>
+struct is_connection_cptr<connection::cptr> : std::true_type {};
+
+
+
 template<typename Function, typename SelfClass>
 bool mrpc::router::invoke_callback(Function f, SelfClass* self,
                                 const std::shared_ptr<connection>& conn,
@@ -705,7 +712,7 @@ bool mrpc::router::invoke_callback(Function f, SelfClass* self,
         }
         // 将json格式的参数转换为业务参数元组
         nlohmann::from_json(json, args);
-        LOG_TRACE("recv msg: {}({}), content: {}, biz args: {}", func_name, id, json.dump(), args);
+        // LOG_TRACE("recv msg: {}({}), content: {}, biz args: {}", func_name, id, json.dump(), args);
 
         //非类成员函数
         if constexpr (std::is_null_pointer_v<SelfClass>) {
@@ -760,7 +767,6 @@ bool mrpc::router::invoke_callback(Function f, SelfClass* self,
         return !is_no_response ? conn->response(id, status::internal_server_error, "unknown error", nullptr) : true;
     }
 
-    // -------------------------- 5. 统一返回响应（无需响应则直接返回true） --------------------------
     return !is_no_response ? conn->response(id, status::ok, "success", jret) : true;
 }
 
