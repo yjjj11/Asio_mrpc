@@ -1,0 +1,1 @@
+/usr/bin/c++ CMakeFiles/other_server.dir/src/server/other_server.cpp.o -o /home/yjj/learning/Asio_mrpc/bin/other_server  /usr/lib/x86_64-linux-gnu/libzookeeper_mt.so -lpthread 

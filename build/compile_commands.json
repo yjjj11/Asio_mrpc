@@ -1,0 +1,38 @@
+[
+{
+  "directory": "/home/yjj/learning/Asio_mrpc/build/example/async_call_client",
+  "command": "/usr/bin/c++ -DASIO_STANDALONE -DPROJECT_NAME=\\\"async_call_client\\\" -DRPC_USE_LOG -DSPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_OFF -D_LOG_CONSOLE -I/home/yjj/learning/Asio_mrpc/include -I/home/yjj/learning/Asio_mrpc/third/asio-1.18.1/include -I/home/yjj/learning/Asio_mrpc/third/spdlog/include -I/home/yjj/learning/Asio_mrpc/third/wlog/include -I/home/yjj/learning/Asio_mrpc/third/nlohmann/include -I/home/yjj/learning/Asio_mrpc/example/async_call_client/src   -g -O0 -Wall -std=c++2a -o CMakeFiles/async_call_client.dir/src/client/main.cpp.o -c /home/yjj/learning/Asio_mrpc/example/async_call_client/src/client/main.cpp",
+  "file": "/home/yjj/learning/Asio_mrpc/example/async_call_client/src/client/main.cpp",
+  "output": "example/async_call_client/CMakeFiles/async_call_client.dir/src/client/main.cpp.o"
+},
+{
+  "directory": "/home/yjj/learning/Asio_mrpc/build/example/block_call_client",
+  "command": "/usr/bin/c++ -DASIO_STANDALONE -DPROJECT_NAME=\\\"block_call_client\\\" -DRPC_USE_LOG -DSPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_OFF -D_LOG_CONSOLE -I/home/yjj/learning/Asio_mrpc/include -I/home/yjj/learning/Asio_mrpc/third/asio-1.18.1/include -I/home/yjj/learning/Asio_mrpc/third/spdlog/include -I/home/yjj/learning/Asio_mrpc/third/wlog/include -I/home/yjj/learning/Asio_mrpc/third/nlohmann/include -I/home/yjj/learning/Asio_mrpc/example/block_call_client/src   -g -O0 -Wall -std=c++2a -o CMakeFiles/block_call_client.dir/src/client/main.cpp.o -c /home/yjj/learning/Asio_mrpc/example/block_call_client/src/client/main.cpp",
+  "file": "/home/yjj/learning/Asio_mrpc/example/block_call_client/src/client/main.cpp",
+  "output": "example/block_call_client/CMakeFiles/block_call_client.dir/src/client/main.cpp.o"
+},
+{
+  "directory": "/home/yjj/learning/Asio_mrpc/build/example/coro_call_client",
+  "command": "/usr/bin/c++ -DASIO_STANDALONE -DPROJECT_NAME=\\\"coro_call_client\\\" -DRPC_USE_LOG -DSPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_OFF -D_LOG_CONSOLE -D_USE_COROUTINE -I/home/yjj/learning/Asio_mrpc/include -I/home/yjj/learning/Asio_mrpc/third/asio-1.18.1/include -I/home/yjj/learning/Asio_mrpc/third/spdlog/include -I/home/yjj/learning/Asio_mrpc/third/wlog/include -I/home/yjj/learning/Asio_mrpc/third/nlohmann/include -I/home/yjj/learning/Asio_mrpc/example/coro_call_client/src   -g -O0 -Wall -std=c++2a -fcoroutines -o CMakeFiles/coro_call_client.dir/src/client/main.cpp.o -c /home/yjj/learning/Asio_mrpc/example/coro_call_client/src/client/main.cpp",
+  "file": "/home/yjj/learning/Asio_mrpc/example/coro_call_client/src/client/main.cpp",
+  "output": "example/coro_call_client/CMakeFiles/coro_call_client.dir/src/client/main.cpp.o"
+},
+{
+  "directory": "/home/yjj/learning/Asio_mrpc/build/example/server_register",
+  "command": "/usr/bin/c++ -DASIO_STANDALONE -DRPC_USE_LOG -DSPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_OFF -D_LOG_CONSOLE -I/home/yjj/learning/Asio_mrpc/include -I/home/yjj/learning/Asio_mrpc/third/asio-1.18.1/include -I/home/yjj/learning/Asio_mrpc/third/spdlog/include -I/home/yjj/learning/Asio_mrpc/third/wlog/include -I/home/yjj/learning/Asio_mrpc/third/nlohmann/include -I/home/yjj/learning/Asio_mrpc/example/server_register/src   -g -O0 -Wall -std=c++2a -o CMakeFiles/test_server.dir/src/server/test_server.cpp.o -c /home/yjj/learning/Asio_mrpc/example/server_register/src/server/test_server.cpp",
+  "file": "/home/yjj/learning/Asio_mrpc/example/server_register/src/server/test_server.cpp",
+  "output": "example/server_register/CMakeFiles/test_server.dir/src/server/test_server.cpp.o"
+},
+{
+  "directory": "/home/yjj/learning/Asio_mrpc/build/example/server_register",
+  "command": "/usr/bin/c++ -DASIO_STANDALONE -DRPC_USE_LOG -DSPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_OFF -D_LOG_CONSOLE -I/home/yjj/learning/Asio_mrpc/include -I/home/yjj/learning/Asio_mrpc/third/asio-1.18.1/include -I/home/yjj/learning/Asio_mrpc/third/spdlog/include -I/home/yjj/learning/Asio_mrpc/third/wlog/include -I/home/yjj/learning/Asio_mrpc/third/nlohmann/include -I/home/yjj/learning/Asio_mrpc/example/server_register/src   -g -O0 -Wall -std=c++2a -o CMakeFiles/other_server.dir/src/server/other_server.cpp.o -c /home/yjj/learning/Asio_mrpc/example/server_register/src/server/other_server.cpp",
+  "file": "/home/yjj/learning/Asio_mrpc/example/server_register/src/server/other_server.cpp",
+  "output": "example/server_register/CMakeFiles/other_server.dir/src/server/other_server.cpp.o"
+},
+{
+  "directory": "/home/yjj/learning/Asio_mrpc/build/example/two_way_call",
+  "command": "/usr/bin/c++ -DASIO_STANDALONE -DPROJECT_NAME=\\\"two_way_call\\\" -DRPC_USE_LOG -DSPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_OFF -D_LOG_CONSOLE -I/home/yjj/learning/Asio_mrpc/include -I/home/yjj/learning/Asio_mrpc/third/asio-1.18.1/include -I/home/yjj/learning/Asio_mrpc/third/spdlog/include -I/home/yjj/learning/Asio_mrpc/third/wlog/include -I/home/yjj/learning/Asio_mrpc/third/nlohmann/include -I/home/yjj/learning/Asio_mrpc/example/two_way_call/src   -g -O0 -Wall -std=c++2a -o CMakeFiles/two_way_call.dir/src/client/main.cpp.o -c /home/yjj/learning/Asio_mrpc/example/two_way_call/src/client/main.cpp",
+  "file": "/home/yjj/learning/Asio_mrpc/example/two_way_call/src/client/main.cpp",
+  "output": "example/two_way_call/CMakeFiles/two_way_call.dir/src/client/main.cpp.o"
+}
+]
