@@ -10,6 +10,14 @@
 - ZooKeeper：服务注册与发现、Watcher 监听、客户端本地缓存
 - 日志：`spdlog`/`wlog` 集成
 
+## 快速开始
+```sh
+mkdir build & cd build
+cmake ..
+make -j
+```
+生成的可运行文件将会在bin目录下
+
 ## 架构与模块
 - Server：[server.hpp](include/mrpc/server.hpp) 服务端入口、`io_context` 池与线程池管理、统一函数注册封装、ZooKeeper 注册
 - Client：[client.hpp](include/mrpc/client.hpp) 客户端入口、对称的 `io_context` 管理、预留发现与缓存结构
@@ -76,7 +84,7 @@ task<int> t(mrpc::connection::cptr conn) {
 }
 ```
 
-## 学习收获
+## 可以获得的收获
 - 现代 C++ 泛型编程与模板技巧：函数特征、参数解构、编译期条件,重中之重
 - 网络异步编程模型：Reactor、`io_context` 池化、队列化写、超时与错误处理
 - 协程工程化应用：自定义 awaitable/promise，与网络 I/O 协同 重中之重
@@ -98,4 +106,5 @@ task<int> t(mrpc::connection::cptr conn) {
 
 ## 致谢
 灵感来源于 `rest_rpc`，在其基础上以现代 C++ 技术栈重构并扩展了工程能力与生态集成。
+
 
