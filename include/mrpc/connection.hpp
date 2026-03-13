@@ -348,6 +348,25 @@ task_awaitable<RET> coro_call(const std::string& rpc_name, Args&&...args) {
     this->write(id, std::move(json_args));
     auto suspend = [this, req_id](stdcoro::coroutine_handle<> h) -> void {
         std::unique_lock<std::mutex> lock(this->cb_mtx_);
+        
+        // 检查是否有延迟响应
+        {
+            std::lock_guard<std::mutex> lock(this->delayed_response_mutex_);
+            auto iter = this->delayed_responses_.find(req_id);
+            if (iter != this->delayed_responses_.end()) { 	
+                // 有延迟响应，直接处理
+                auto [id, body] = iter->second;
+                this->msg_type_ = id.msg_type;
+                this->msg_id_ = id.msg_id;
+                this->req_id_ = id.req_id;
+                this->msg_body_ = std::move(body);
+                this->delayed_responses_.erase(iter);
+                h.resume();
+                return;
+            }
+        }
+        
+        // 没有延迟响应，注册handle
         this->corotine_map_[req_id] = h;
     };
 
@@ -590,18 +609,26 @@ task_awaitable<RET> coro_call(const std::string& rpc_name, Args&&...args) {
 
     void on_coroutine_response(msg_id_t id) {
 #ifdef _USE_COROUTINE
-        stdcoro::coroutine_handle<> h;
-        {
-            std::lock_guard<std::mutex> lock(cb_mtx_);
-            auto iter = corotine_map_.find(id.req_id);
-            if (iter != corotine_map_.end()) {
-                h = iter->second;
-                corotine_map_.erase(iter);
-            } else {
-                LOG_WARN("corotine not found, req id: {}, msg_id: {}", id.req_id, id.msg_id);
+         stdcoro::coroutine_handle<> h;
+            bool found = false;
+            
+            {
+                std::lock_guard<std::mutex> lock(cb_mtx_);
+                auto iter = corotine_map_.find(id.req_id);
+                if (iter != corotine_map_.end()) {
+                    h = iter->second;
+                    corotine_map_.erase(iter);
+                    found = true;
+                }
             }
-        }
-        if (h) h.resume();
+            
+            if (found) {
+                h.resume();
+            } else {
+                // 缓存延迟响应
+                std::lock_guard<std::mutex> lock(delayed_response_mutex_);
+                delayed_responses_[id.req_id] = std::make_pair(id, msg_body_);
+            }
 #endif
     }
 
@@ -677,6 +704,8 @@ task_awaitable<RET> coro_call(const std::string& rpc_name, Args&&...args) {
     std::unordered_map<uint64_t, std::shared_ptr<callback_t>> callback_map_;
 #ifdef _USE_COROUTINE
     std::unordered_map<uint64_t, stdcoro::coroutine_handle<>> corotine_map_;
+	std::mutex delayed_response_mutex_;
+    std::unordered_map<uint64_t, std::pair<msg_id_t, std::string>> delayed_responses_;
 #endif
 	std::mutex write_mtx_;
 	std::deque<std::pair<msg_id_t, std::string>> write_queue_;
