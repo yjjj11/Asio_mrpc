@@ -47,8 +47,13 @@ link_libraries(
 )
 
 # 递归查找example下的所有子项目
-add_subdirectory(${CMAKE_HOME_DIRECTORY}/example/async_call_client)
-add_subdirectory(${CMAKE_HOME_DIRECTORY}/example/block_call_client)
-add_subdirectory(${CMAKE_HOME_DIRECTORY}/example/coro_call_client)
-add_subdirectory(${CMAKE_HOME_DIRECTORY}/example/server_register)
-add_subdirectory(${CMAKE_HOME_DIRECTORY}/example/two_way_call)
+# add_subdirectory(${CMAKE_HOME_DIRECTORY}/example/async_call_client)
+# add_subdirectory(${CMAKE_HOME_DIRECTORY}/example/block_call_client)
+# add_subdirectory(${CMAKE_HOME_DIRECTORY}/example/coro_call_client)
+# add_subdirectory(${CMAKE_HOME_DIRECTORY}/example/server_register)
+# add_subdirectory(${CMAKE_HOME_DIRECTORY}/example/two_way_call)
+
+# 聊天室服务器
+add_executable(chat_server ${CMAKE_HOME_DIRECTORY}/chatting_room/server.cpp)
+# 聊天室客户端
+add_executable(chat_client ${CMAKE_HOME_DIRECTORY}/chatting_room/client.cpp)

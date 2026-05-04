@@ -7,15 +7,10 @@ set(CMAKE_DEPENDS_GENERATOR "Unix Makefiles")
 # The top level Makefile was generated from the following files:
 set(CMAKE_MAKEFILE_DEPENDS
   "CMakeCache.txt"
-  "/home/yjj/learning/Asio_mrpc/CMakeLists.txt"
+  "/root/Asio_mrpc/CMakeLists.txt"
   "CMakeFiles/3.28.3/CMakeCCompiler.cmake"
   "CMakeFiles/3.28.3/CMakeCXXCompiler.cmake"
   "CMakeFiles/3.28.3/CMakeSystem.cmake"
-  "/home/yjj/learning/Asio_mrpc/example/async_call_client/CMakeLists.txt"
-  "/home/yjj/learning/Asio_mrpc/example/block_call_client/CMakeLists.txt"
-  "/home/yjj/learning/Asio_mrpc/example/coro_call_client/CMakeLists.txt"
-  "/home/yjj/learning/Asio_mrpc/example/server_register/CMakeLists.txt"
-  "/home/yjj/learning/Asio_mrpc/example/two_way_call/CMakeLists.txt"
   "/usr/share/cmake-3.28/Modules/CMakeCInformation.cmake"
   "/usr/share/cmake-3.28/Modules/CMakeCXXInformation.cmake"
   "/usr/share/cmake-3.28/Modules/CMakeCommonLanguageInclude.cmake"
@@ -52,19 +47,10 @@ set(CMAKE_MAKEFILE_OUTPUTS
 # Byproducts of CMake generate step:
 set(CMAKE_MAKEFILE_PRODUCTS
   "CMakeFiles/CMakeDirectoryInformation.cmake"
-  "example/async_call_client/CMakeFiles/CMakeDirectoryInformation.cmake"
-  "example/block_call_client/CMakeFiles/CMakeDirectoryInformation.cmake"
-  "example/coro_call_client/CMakeFiles/CMakeDirectoryInformation.cmake"
-  "example/server_register/CMakeFiles/CMakeDirectoryInformation.cmake"
-  "example/two_way_call/CMakeFiles/CMakeDirectoryInformation.cmake"
   )
 
 # Dependency information for all targets:
 set(CMAKE_DEPEND_INFO_FILES
-  "example/async_call_client/CMakeFiles/async_call_client.dir/DependInfo.cmake"
-  "example/block_call_client/CMakeFiles/block_call_client.dir/DependInfo.cmake"
-  "example/coro_call_client/CMakeFiles/coro_call_client.dir/DependInfo.cmake"
-  "example/server_register/CMakeFiles/test_server.dir/DependInfo.cmake"
-  "example/server_register/CMakeFiles/other_server.dir/DependInfo.cmake"
-  "example/two_way_call/CMakeFiles/two_way_call.dir/DependInfo.cmake"
+  "CMakeFiles/chat_server.dir/DependInfo.cmake"
+  "CMakeFiles/chat_client.dir/DependInfo.cmake"
   )

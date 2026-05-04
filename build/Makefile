@@ -57,10 +57,10 @@ RM = /usr/bin/cmake -E rm -f
 EQUALS = =
 
 # The top-level source directory on which CMake was run.
-CMAKE_SOURCE_DIR = /home/yjj/learning/Asio_mrpc
+CMAKE_SOURCE_DIR = /root/Asio_mrpc
 
 # The top-level build directory on which CMake was run.
-CMAKE_BINARY_DIR = /home/yjj/learning/Asio_mrpc/build
+CMAKE_BINARY_DIR = /root/Asio_mrpc/build
 
 #=============================================================================
 # Targets provided globally by CMake.
@@ -87,9 +87,9 @@ rebuild_cache/fast: rebuild_cache
 
 # The main all target
 all: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /home/yjj/learning/Asio_mrpc/build/CMakeFiles /home/yjj/learning/Asio_mrpc/build//CMakeFiles/progress.marks
+	$(CMAKE_COMMAND) -E cmake_progress_start /root/Asio_mrpc/build/CMakeFiles /root/Asio_mrpc/build//CMakeFiles/progress.marks
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 all
-	$(CMAKE_COMMAND) -E cmake_progress_start /home/yjj/learning/Asio_mrpc/build/CMakeFiles 0
+	$(CMAKE_COMMAND) -E cmake_progress_start /root/Asio_mrpc/build/CMakeFiles 0
 .PHONY : all
 
 # The main clean target
@@ -117,82 +117,78 @@ depend:
 .PHONY : depend
 
 #=============================================================================
-# Target rules for targets named async_call_client
+# Target rules for targets named chat_server
 
 # Build rule for target.
-async_call_client: cmake_check_build_system
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 async_call_client
-.PHONY : async_call_client
+chat_server: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 chat_server
+.PHONY : chat_server
 
 # fast build rule for target.
-async_call_client/fast:
-	$(MAKE) $(MAKESILENT) -f example/async_call_client/CMakeFiles/async_call_client.dir/build.make example/async_call_client/CMakeFiles/async_call_client.dir/build
-.PHONY : async_call_client/fast
+chat_server/fast:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/chat_server.dir/build.make CMakeFiles/chat_server.dir/build
+.PHONY : chat_server/fast
 
 #=============================================================================
-# Target rules for targets named block_call_client
+# Target rules for targets named chat_client
 
 # Build rule for target.
-block_call_client: cmake_check_build_system
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 block_call_client
-.PHONY : block_call_client
+chat_client: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 chat_client
+.PHONY : chat_client
 
 # fast build rule for target.
-block_call_client/fast:
-	$(MAKE) $(MAKESILENT) -f example/block_call_client/CMakeFiles/block_call_client.dir/build.make example/block_call_client/CMakeFiles/block_call_client.dir/build
-.PHONY : block_call_client/fast
+chat_client/fast:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/chat_client.dir/build.make CMakeFiles/chat_client.dir/build
+.PHONY : chat_client/fast
 
-#=============================================================================
-# Target rules for targets named coro_call_client
+chatting_room/client.o: chatting_room/client.cpp.o
+.PHONY : chatting_room/client.o
 
-# Build rule for target.
-coro_call_client: cmake_check_build_system
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 coro_call_client
-.PHONY : coro_call_client
+# target to build an object file
+chatting_room/client.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/chat_client.dir/build.make CMakeFiles/chat_client.dir/chatting_room/client.cpp.o
+.PHONY : chatting_room/client.cpp.o
 
-# fast build rule for target.
-coro_call_client/fast:
-	$(MAKE) $(MAKESILENT) -f example/coro_call_client/CMakeFiles/coro_call_client.dir/build.make example/coro_call_client/CMakeFiles/coro_call_client.dir/build
-.PHONY : coro_call_client/fast
+chatting_room/client.i: chatting_room/client.cpp.i
+.PHONY : chatting_room/client.i
 
-#=============================================================================
-# Target rules for targets named test_server
+# target to preprocess a source file
+chatting_room/client.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/chat_client.dir/build.make CMakeFiles/chat_client.dir/chatting_room/client.cpp.i
+.PHONY : chatting_room/client.cpp.i
 
-# Build rule for target.
-test_server: cmake_check_build_system
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 test_server
-.PHONY : test_server
+chatting_room/client.s: chatting_room/client.cpp.s
+.PHONY : chatting_room/client.s
 
-# fast build rule for target.
-test_server/fast:
-	$(MAKE) $(MAKESILENT) -f example/server_register/CMakeFiles/test_server.dir/build.make example/server_register/CMakeFiles/test_server.dir/build
-.PHONY : test_server/fast
+# target to generate assembly for a file
+chatting_room/client.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/chat_client.dir/build.make CMakeFiles/chat_client.dir/chatting_room/client.cpp.s
+.PHONY : chatting_room/client.cpp.s
 
-#=============================================================================
-# Target rules for targets named other_server
+chatting_room/server.o: chatting_room/server.cpp.o
+.PHONY : chatting_room/server.o
 
-# Build rule for target.
-other_server: cmake_check_build_system
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 other_server
-.PHONY : other_server
+# target to build an object file
+chatting_room/server.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/chat_server.dir/build.make CMakeFiles/chat_server.dir/chatting_room/server.cpp.o
+.PHONY : chatting_room/server.cpp.o
 
-# fast build rule for target.
-other_server/fast:
-	$(MAKE) $(MAKESILENT) -f example/server_register/CMakeFiles/other_server.dir/build.make example/server_register/CMakeFiles/other_server.dir/build
-.PHONY : other_server/fast
+chatting_room/server.i: chatting_room/server.cpp.i
+.PHONY : chatting_room/server.i
 
-#=============================================================================
-# Target rules for targets named two_way_call
+# target to preprocess a source file
+chatting_room/server.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/chat_server.dir/build.make CMakeFiles/chat_server.dir/chatting_room/server.cpp.i
+.PHONY : chatting_room/server.cpp.i
 
-# Build rule for target.
-two_way_call: cmake_check_build_system
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 two_way_call
-.PHONY : two_way_call
+chatting_room/server.s: chatting_room/server.cpp.s
+.PHONY : chatting_room/server.s
 
-# fast build rule for target.
-two_way_call/fast:
-	$(MAKE) $(MAKESILENT) -f example/two_way_call/CMakeFiles/two_way_call.dir/build.make example/two_way_call/CMakeFiles/two_way_call.dir/build
-.PHONY : two_way_call/fast
+# target to generate assembly for a file
+chatting_room/server.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/chat_server.dir/build.make CMakeFiles/chat_server.dir/chatting_room/server.cpp.s
+.PHONY : chatting_room/server.cpp.s
 
 # Help Target
 help:
@@ -202,12 +198,14 @@ help:
 	@echo "... depend"
 	@echo "... edit_cache"
 	@echo "... rebuild_cache"
-	@echo "... async_call_client"
-	@echo "... block_call_client"
-	@echo "... coro_call_client"
-	@echo "... other_server"
-	@echo "... test_server"
-	@echo "... two_way_call"
+	@echo "... chat_client"
+	@echo "... chat_server"
+	@echo "... chatting_room/client.o"
+	@echo "... chatting_room/client.i"
+	@echo "... chatting_room/client.s"
+	@echo "... chatting_room/server.o"
+	@echo "... chatting_room/server.i"
+	@echo "... chatting_room/server.s"
 .PHONY : help
 
 

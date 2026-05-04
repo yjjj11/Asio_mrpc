@@ -124,8 +124,10 @@ class router {
     template<typename Function>
     void reg_handle(const std::string& name, Function f) {
         auto h = hash(name);
-        invokes_[h] = { name, [f](const std::shared_ptr<connection>& conn, const std::string& func_name, msg_id_t id, const std::string& buffer) {
-            return invoke_callback<Function, std::nullptr_t>(f, nullptr, conn, func_name, id, buffer);
+        invokes_[h] = { name, [f](const std::shared_ptr<connection>& conn, 
+            const std::string& func_name, msg_id_t id, const std::string& buffer) {
+            return invoke_callback<Function, std::nullptr_t>
+                (f, nullptr, conn, func_name, id, buffer);
         }
                       };
     }
@@ -133,8 +135,10 @@ class router {
     template<typename Function, typename SelfClass>
     void reg_handle(const std::string& name, Function f,std::shared_ptr<SelfClass> self) {
         auto h = hash(name);
-        invokes_[h] = { name, [f, self](const std::shared_ptr<connection>& conn, const std::string& func_name, msg_id_t id, const std::string& buffer) {
-            return invoke_callback<Function, SelfClass>(f, self.get(), conn, func_name, id, buffer);
+        invokes_[h] = { name, [f, self](const std::shared_ptr<connection>& conn, 
+            const std::string& func_name, msg_id_t id, const std::string& buffer) {
+            return invoke_callback<Function, SelfClass>
+                (f, self.get(), conn, func_name, id, buffer);
         }
                       };
     }

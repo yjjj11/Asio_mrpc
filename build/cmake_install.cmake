@@ -1,4 +1,4 @@
-# Install script for directory: /home/yjj/learning/Asio_mrpc
+# Install script for directory: /root/Asio_mrpc
 
 # Set the install prefix
 if(NOT DEFINED CMAKE_INSTALL_PREFIX)
@@ -42,16 +42,6 @@ if(NOT DEFINED CMAKE_OBJDUMP)
   set(CMAKE_OBJDUMP "/usr/bin/objdump")
 endif()
 
-if(NOT CMAKE_INSTALL_LOCAL_ONLY)
-  # Include the install script for each subdirectory.
-  include("/home/yjj/learning/Asio_mrpc/build/example/async_call_client/cmake_install.cmake")
-  include("/home/yjj/learning/Asio_mrpc/build/example/block_call_client/cmake_install.cmake")
-  include("/home/yjj/learning/Asio_mrpc/build/example/coro_call_client/cmake_install.cmake")
-  include("/home/yjj/learning/Asio_mrpc/build/example/server_register/cmake_install.cmake")
-  include("/home/yjj/learning/Asio_mrpc/build/example/two_way_call/cmake_install.cmake")
-
-endif()
-
 if(CMAKE_INSTALL_COMPONENT)
   set(CMAKE_INSTALL_MANIFEST "install_manifest_${CMAKE_INSTALL_COMPONENT}.txt")
 else()
@@ -60,5 +50,5 @@ endif()
 
 string(REPLACE ";" "\n" CMAKE_INSTALL_MANIFEST_CONTENT
        "${CMAKE_INSTALL_MANIFEST_FILES}")
-file(WRITE "/home/yjj/learning/Asio_mrpc/build/${CMAKE_INSTALL_MANIFEST}"
+file(WRITE "/root/Asio_mrpc/build/${CMAKE_INSTALL_MANIFEST}"
      "${CMAKE_INSTALL_MANIFEST_CONTENT}")

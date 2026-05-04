@@ -54,270 +54,79 @@ RM = /usr/bin/cmake -E rm -f
 EQUALS = =
 
 # The top-level source directory on which CMake was run.
-CMAKE_SOURCE_DIR = /home/yjj/learning/Asio_mrpc
+CMAKE_SOURCE_DIR = /root/Asio_mrpc
 
 # The top-level build directory on which CMake was run.
-CMAKE_BINARY_DIR = /home/yjj/learning/Asio_mrpc/build
+CMAKE_BINARY_DIR = /root/Asio_mrpc/build
 
 #=============================================================================
 # Directory level rules for the build root directory
 
 # The main recursive "all" target.
-all: example/async_call_client/all
-all: example/block_call_client/all
-all: example/coro_call_client/all
-all: example/server_register/all
-all: example/two_way_call/all
+all: CMakeFiles/chat_server.dir/all
+all: CMakeFiles/chat_client.dir/all
 .PHONY : all
 
 # The main recursive "preinstall" target.
-preinstall: example/async_call_client/preinstall
-preinstall: example/block_call_client/preinstall
-preinstall: example/coro_call_client/preinstall
-preinstall: example/server_register/preinstall
-preinstall: example/two_way_call/preinstall
+preinstall:
 .PHONY : preinstall
 
 # The main recursive "clean" target.
-clean: example/async_call_client/clean
-clean: example/block_call_client/clean
-clean: example/coro_call_client/clean
-clean: example/server_register/clean
-clean: example/two_way_call/clean
+clean: CMakeFiles/chat_server.dir/clean
+clean: CMakeFiles/chat_client.dir/clean
 .PHONY : clean
 
 #=============================================================================
-# Directory level rules for directory example/async_call_client
-
-# Recursive "all" directory target.
-example/async_call_client/all: example/async_call_client/CMakeFiles/async_call_client.dir/all
-.PHONY : example/async_call_client/all
-
-# Recursive "preinstall" directory target.
-example/async_call_client/preinstall:
-.PHONY : example/async_call_client/preinstall
-
-# Recursive "clean" directory target.
-example/async_call_client/clean: example/async_call_client/CMakeFiles/async_call_client.dir/clean
-.PHONY : example/async_call_client/clean
-
-#=============================================================================
-# Directory level rules for directory example/block_call_client
-
-# Recursive "all" directory target.
-example/block_call_client/all: example/block_call_client/CMakeFiles/block_call_client.dir/all
-.PHONY : example/block_call_client/all
-
-# Recursive "preinstall" directory target.
-example/block_call_client/preinstall:
-.PHONY : example/block_call_client/preinstall
-
-# Recursive "clean" directory target.
-example/block_call_client/clean: example/block_call_client/CMakeFiles/block_call_client.dir/clean
-.PHONY : example/block_call_client/clean
-
-#=============================================================================
-# Directory level rules for directory example/coro_call_client
-
-# Recursive "all" directory target.
-example/coro_call_client/all: example/coro_call_client/CMakeFiles/coro_call_client.dir/all
-.PHONY : example/coro_call_client/all
-
-# Recursive "preinstall" directory target.
-example/coro_call_client/preinstall:
-.PHONY : example/coro_call_client/preinstall
-
-# Recursive "clean" directory target.
-example/coro_call_client/clean: example/coro_call_client/CMakeFiles/coro_call_client.dir/clean
-.PHONY : example/coro_call_client/clean
-
-#=============================================================================
-# Directory level rules for directory example/server_register
-
-# Recursive "all" directory target.
-example/server_register/all: example/server_register/CMakeFiles/test_server.dir/all
-example/server_register/all: example/server_register/CMakeFiles/other_server.dir/all
-.PHONY : example/server_register/all
-
-# Recursive "preinstall" directory target.
-example/server_register/preinstall:
-.PHONY : example/server_register/preinstall
-
-# Recursive "clean" directory target.
-example/server_register/clean: example/server_register/CMakeFiles/test_server.dir/clean
-example/server_register/clean: example/server_register/CMakeFiles/other_server.dir/clean
-.PHONY : example/server_register/clean
-
-#=============================================================================
-# Directory level rules for directory example/two_way_call
-
-# Recursive "all" directory target.
-example/two_way_call/all: example/two_way_call/CMakeFiles/two_way_call.dir/all
-.PHONY : example/two_way_call/all
-
-# Recursive "preinstall" directory target.
-example/two_way_call/preinstall:
-.PHONY : example/two_way_call/preinstall
-
-# Recursive "clean" directory target.
-example/two_way_call/clean: example/two_way_call/CMakeFiles/two_way_call.dir/clean
-.PHONY : example/two_way_call/clean
-
-#=============================================================================
-# Target rules for target example/async_call_client/CMakeFiles/async_call_client.dir
+# Target rules for target CMakeFiles/chat_server.dir
 
 # All Build rule for target.
-example/async_call_client/CMakeFiles/async_call_client.dir/all:
-	$(MAKE) $(MAKESILENT) -f example/async_call_client/CMakeFiles/async_call_client.dir/build.make example/async_call_client/CMakeFiles/async_call_client.dir/depend
-	$(MAKE) $(MAKESILENT) -f example/async_call_client/CMakeFiles/async_call_client.dir/build.make example/async_call_client/CMakeFiles/async_call_client.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/yjj/learning/Asio_mrpc/build/CMakeFiles --progress-num=1,2 "Built target async_call_client"
-.PHONY : example/async_call_client/CMakeFiles/async_call_client.dir/all
+CMakeFiles/chat_server.dir/all:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/chat_server.dir/build.make CMakeFiles/chat_server.dir/depend
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/chat_server.dir/build.make CMakeFiles/chat_server.dir/build
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/root/Asio_mrpc/build/CMakeFiles --progress-num=3,4 "Built target chat_server"
+.PHONY : CMakeFiles/chat_server.dir/all
 
 # Build rule for subdir invocation for target.
-example/async_call_client/CMakeFiles/async_call_client.dir/rule: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /home/yjj/learning/Asio_mrpc/build/CMakeFiles 2
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 example/async_call_client/CMakeFiles/async_call_client.dir/all
-	$(CMAKE_COMMAND) -E cmake_progress_start /home/yjj/learning/Asio_mrpc/build/CMakeFiles 0
-.PHONY : example/async_call_client/CMakeFiles/async_call_client.dir/rule
+CMakeFiles/chat_server.dir/rule: cmake_check_build_system
+	$(CMAKE_COMMAND) -E cmake_progress_start /root/Asio_mrpc/build/CMakeFiles 2
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/chat_server.dir/all
+	$(CMAKE_COMMAND) -E cmake_progress_start /root/Asio_mrpc/build/CMakeFiles 0
+.PHONY : CMakeFiles/chat_server.dir/rule
 
 # Convenience name for target.
-async_call_client: example/async_call_client/CMakeFiles/async_call_client.dir/rule
-.PHONY : async_call_client
+chat_server: CMakeFiles/chat_server.dir/rule
+.PHONY : chat_server
 
 # clean rule for target.
-example/async_call_client/CMakeFiles/async_call_client.dir/clean:
-	$(MAKE) $(MAKESILENT) -f example/async_call_client/CMakeFiles/async_call_client.dir/build.make example/async_call_client/CMakeFiles/async_call_client.dir/clean
-.PHONY : example/async_call_client/CMakeFiles/async_call_client.dir/clean
+CMakeFiles/chat_server.dir/clean:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/chat_server.dir/build.make CMakeFiles/chat_server.dir/clean
+.PHONY : CMakeFiles/chat_server.dir/clean
 
 #=============================================================================
-# Target rules for target example/block_call_client/CMakeFiles/block_call_client.dir
+# Target rules for target CMakeFiles/chat_client.dir
 
 # All Build rule for target.
-example/block_call_client/CMakeFiles/block_call_client.dir/all:
-	$(MAKE) $(MAKESILENT) -f example/block_call_client/CMakeFiles/block_call_client.dir/build.make example/block_call_client/CMakeFiles/block_call_client.dir/depend
-	$(MAKE) $(MAKESILENT) -f example/block_call_client/CMakeFiles/block_call_client.dir/build.make example/block_call_client/CMakeFiles/block_call_client.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/yjj/learning/Asio_mrpc/build/CMakeFiles --progress-num=3,4 "Built target block_call_client"
-.PHONY : example/block_call_client/CMakeFiles/block_call_client.dir/all
+CMakeFiles/chat_client.dir/all:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/chat_client.dir/build.make CMakeFiles/chat_client.dir/depend
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/chat_client.dir/build.make CMakeFiles/chat_client.dir/build
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/root/Asio_mrpc/build/CMakeFiles --progress-num=1,2 "Built target chat_client"
+.PHONY : CMakeFiles/chat_client.dir/all
 
 # Build rule for subdir invocation for target.
-example/block_call_client/CMakeFiles/block_call_client.dir/rule: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /home/yjj/learning/Asio_mrpc/build/CMakeFiles 2
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 example/block_call_client/CMakeFiles/block_call_client.dir/all
-	$(CMAKE_COMMAND) -E cmake_progress_start /home/yjj/learning/Asio_mrpc/build/CMakeFiles 0
-.PHONY : example/block_call_client/CMakeFiles/block_call_client.dir/rule
+CMakeFiles/chat_client.dir/rule: cmake_check_build_system
+	$(CMAKE_COMMAND) -E cmake_progress_start /root/Asio_mrpc/build/CMakeFiles 2
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/chat_client.dir/all
+	$(CMAKE_COMMAND) -E cmake_progress_start /root/Asio_mrpc/build/CMakeFiles 0
+.PHONY : CMakeFiles/chat_client.dir/rule
 
 # Convenience name for target.
-block_call_client: example/block_call_client/CMakeFiles/block_call_client.dir/rule
-.PHONY : block_call_client
+chat_client: CMakeFiles/chat_client.dir/rule
+.PHONY : chat_client
 
 # clean rule for target.
-example/block_call_client/CMakeFiles/block_call_client.dir/clean:
-	$(MAKE) $(MAKESILENT) -f example/block_call_client/CMakeFiles/block_call_client.dir/build.make example/block_call_client/CMakeFiles/block_call_client.dir/clean
-.PHONY : example/block_call_client/CMakeFiles/block_call_client.dir/clean
-
-#=============================================================================
-# Target rules for target example/coro_call_client/CMakeFiles/coro_call_client.dir
-
-# All Build rule for target.
-example/coro_call_client/CMakeFiles/coro_call_client.dir/all:
-	$(MAKE) $(MAKESILENT) -f example/coro_call_client/CMakeFiles/coro_call_client.dir/build.make example/coro_call_client/CMakeFiles/coro_call_client.dir/depend
-	$(MAKE) $(MAKESILENT) -f example/coro_call_client/CMakeFiles/coro_call_client.dir/build.make example/coro_call_client/CMakeFiles/coro_call_client.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/yjj/learning/Asio_mrpc/build/CMakeFiles --progress-num=5,6 "Built target coro_call_client"
-.PHONY : example/coro_call_client/CMakeFiles/coro_call_client.dir/all
-
-# Build rule for subdir invocation for target.
-example/coro_call_client/CMakeFiles/coro_call_client.dir/rule: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /home/yjj/learning/Asio_mrpc/build/CMakeFiles 2
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 example/coro_call_client/CMakeFiles/coro_call_client.dir/all
-	$(CMAKE_COMMAND) -E cmake_progress_start /home/yjj/learning/Asio_mrpc/build/CMakeFiles 0
-.PHONY : example/coro_call_client/CMakeFiles/coro_call_client.dir/rule
-
-# Convenience name for target.
-coro_call_client: example/coro_call_client/CMakeFiles/coro_call_client.dir/rule
-.PHONY : coro_call_client
-
-# clean rule for target.
-example/coro_call_client/CMakeFiles/coro_call_client.dir/clean:
-	$(MAKE) $(MAKESILENT) -f example/coro_call_client/CMakeFiles/coro_call_client.dir/build.make example/coro_call_client/CMakeFiles/coro_call_client.dir/clean
-.PHONY : example/coro_call_client/CMakeFiles/coro_call_client.dir/clean
-
-#=============================================================================
-# Target rules for target example/server_register/CMakeFiles/test_server.dir
-
-# All Build rule for target.
-example/server_register/CMakeFiles/test_server.dir/all:
-	$(MAKE) $(MAKESILENT) -f example/server_register/CMakeFiles/test_server.dir/build.make example/server_register/CMakeFiles/test_server.dir/depend
-	$(MAKE) $(MAKESILENT) -f example/server_register/CMakeFiles/test_server.dir/build.make example/server_register/CMakeFiles/test_server.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/yjj/learning/Asio_mrpc/build/CMakeFiles --progress-num=9,10 "Built target test_server"
-.PHONY : example/server_register/CMakeFiles/test_server.dir/all
-
-# Build rule for subdir invocation for target.
-example/server_register/CMakeFiles/test_server.dir/rule: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /home/yjj/learning/Asio_mrpc/build/CMakeFiles 2
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 example/server_register/CMakeFiles/test_server.dir/all
-	$(CMAKE_COMMAND) -E cmake_progress_start /home/yjj/learning/Asio_mrpc/build/CMakeFiles 0
-.PHONY : example/server_register/CMakeFiles/test_server.dir/rule
-
-# Convenience name for target.
-test_server: example/server_register/CMakeFiles/test_server.dir/rule
-.PHONY : test_server
-
-# clean rule for target.
-example/server_register/CMakeFiles/test_server.dir/clean:
-	$(MAKE) $(MAKESILENT) -f example/server_register/CMakeFiles/test_server.dir/build.make example/server_register/CMakeFiles/test_server.dir/clean
-.PHONY : example/server_register/CMakeFiles/test_server.dir/clean
-
-#=============================================================================
-# Target rules for target example/server_register/CMakeFiles/other_server.dir
-
-# All Build rule for target.
-example/server_register/CMakeFiles/other_server.dir/all:
-	$(MAKE) $(MAKESILENT) -f example/server_register/CMakeFiles/other_server.dir/build.make example/server_register/CMakeFiles/other_server.dir/depend
-	$(MAKE) $(MAKESILENT) -f example/server_register/CMakeFiles/other_server.dir/build.make example/server_register/CMakeFiles/other_server.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/yjj/learning/Asio_mrpc/build/CMakeFiles --progress-num=7,8 "Built target other_server"
-.PHONY : example/server_register/CMakeFiles/other_server.dir/all
-
-# Build rule for subdir invocation for target.
-example/server_register/CMakeFiles/other_server.dir/rule: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /home/yjj/learning/Asio_mrpc/build/CMakeFiles 2
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 example/server_register/CMakeFiles/other_server.dir/all
-	$(CMAKE_COMMAND) -E cmake_progress_start /home/yjj/learning/Asio_mrpc/build/CMakeFiles 0
-.PHONY : example/server_register/CMakeFiles/other_server.dir/rule
-
-# Convenience name for target.
-other_server: example/server_register/CMakeFiles/other_server.dir/rule
-.PHONY : other_server
-
-# clean rule for target.
-example/server_register/CMakeFiles/other_server.dir/clean:
-	$(MAKE) $(MAKESILENT) -f example/server_register/CMakeFiles/other_server.dir/build.make example/server_register/CMakeFiles/other_server.dir/clean
-.PHONY : example/server_register/CMakeFiles/other_server.dir/clean
-
-#=============================================================================
-# Target rules for target example/two_way_call/CMakeFiles/two_way_call.dir
-
-# All Build rule for target.
-example/two_way_call/CMakeFiles/two_way_call.dir/all:
-	$(MAKE) $(MAKESILENT) -f example/two_way_call/CMakeFiles/two_way_call.dir/build.make example/two_way_call/CMakeFiles/two_way_call.dir/depend
-	$(MAKE) $(MAKESILENT) -f example/two_way_call/CMakeFiles/two_way_call.dir/build.make example/two_way_call/CMakeFiles/two_way_call.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/yjj/learning/Asio_mrpc/build/CMakeFiles --progress-num=11,12 "Built target two_way_call"
-.PHONY : example/two_way_call/CMakeFiles/two_way_call.dir/all
-
-# Build rule for subdir invocation for target.
-example/two_way_call/CMakeFiles/two_way_call.dir/rule: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /home/yjj/learning/Asio_mrpc/build/CMakeFiles 2
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 example/two_way_call/CMakeFiles/two_way_call.dir/all
-	$(CMAKE_COMMAND) -E cmake_progress_start /home/yjj/learning/Asio_mrpc/build/CMakeFiles 0
-.PHONY : example/two_way_call/CMakeFiles/two_way_call.dir/rule
-
-# Convenience name for target.
-two_way_call: example/two_way_call/CMakeFiles/two_way_call.dir/rule
-.PHONY : two_way_call
-
-# clean rule for target.
-example/two_way_call/CMakeFiles/two_way_call.dir/clean:
-	$(MAKE) $(MAKESILENT) -f example/two_way_call/CMakeFiles/two_way_call.dir/build.make example/two_way_call/CMakeFiles/two_way_call.dir/clean
-.PHONY : example/two_way_call/CMakeFiles/two_way_call.dir/clean
+CMakeFiles/chat_client.dir/clean:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/chat_client.dir/build.make CMakeFiles/chat_client.dir/clean
+.PHONY : CMakeFiles/chat_client.dir/clean
 
 #=============================================================================
 # Special targets to cleanup operation of make.

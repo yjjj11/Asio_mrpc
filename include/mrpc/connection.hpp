@@ -730,7 +730,7 @@ bool mrpc::router::invoke_callback(Function f, SelfClass* self,
     static constexpr bool need_pass_conn = FuncTraits::has_conn_first; //调用时是否需要传入connection::cpr
     bool is_no_response = id.msg_type & (1 << MSG_IS_NO_RESPONSE);
 
-    typename FuncTraits::args_tuple args; // 业务参数元组
+    typename FuncTraits::args_tuple args; // 创建一个FuncTraits::args_tuple类型的业务参数元组
     nlohmann::json json = decode(id.msg_type, buffer);//从网络流中将参数解析到json中去
     nlohmann::json jret;
 
