@@ -3,7 +3,7 @@
 #pragma once
 
 #include "connection.hpp"
-#include "ZookeeperUtil.hpp"
+#include <functional>
 namespace mrpc {
 using namespace asio::ip;
 class connection;
@@ -25,20 +25,9 @@ class server final : private asio::noncopyable {
         local_ip_ = ip;
         local_port_ = port;
     }
-    void set_zk_ip_port(const std::string& ip, const uint64_t& port) {
-        zk_client_.set_ip_port(ip, port);
-    }
-    void set_server_name(const std::string& name) {
-        server_name_ = name;
-    }
-    // 核心：单个模板函数，完美转发所有参数到reg_handle
     template <typename Func, typename... Args>
     void reg_func(const std::string& name, Func&& func, Args&&... args) {
         router_.reg_handle(name, std::forward<Func>(func), std::forward<Args>(args)...);
-        // 统一注册ZK节点
-        std::string zk_node_path = "/mrpc/" + server_name_ + "/" + name;
-        std::string zk_node_data = local_ip_ + ":" + std::to_string(local_port_);
-        zk_client_.create(zk_node_path, zk_node_data, ZOO_EPHEMERAL);
     }
     
     /**
@@ -92,25 +81,6 @@ class server final : private asio::noncopyable {
         }
         is_running_ = true;
         LOG_INFO("server runing ...");
-
-
-        register_to_Zk();
-        // 你的服务节点路径，比如 /mrpc/test_server   
- }
-
-    void register_to_Zk() {
-        if (is_registered_to_zk_) return; // prevent call repeated.
-        zk_client_.start();//启动zookeeper客户端
-        LOG_INFO("Zookeeper client start SUCCESS! ZK connection is ready");
-        if(server_name_.empty()){
-            LOG_ERROR("\nserver name is empty, please set it by set_server_name\n");
-            return;
-        }
-        std::string node_path="/mrpc/" + server_name_;
-        std::string node_data = local_ip_ + ":" + std::to_string(local_port_);
-        zk_client_.create(node_path, node_data, 0);
-        LOG_INFO("Zookeeper node create SUCCESS! Node path: {}, Node data: {}", node_path, node_data);
-        is_registered_to_zk_ = true;
     }
     /**
      *  run once and call by user
@@ -153,6 +123,12 @@ class server final : private asio::noncopyable {
      */
     mrpc::router& router() {
         return router_;
+    }
+
+    /// 设置新连接回调（可用于设置 idle timeout、closed_callback 等）
+    using accept_callback_type = std::function<void(std::shared_ptr<connection>)>;
+    void set_on_accept_callback(accept_callback_type cb) {
+        on_accept_callback_ = std::move(cb);
     }
 
     /**
@@ -202,28 +178,31 @@ class server final : private asio::noncopyable {
             // create new connection
             auto conn = std::make_shared<connection>(std::move(socket), router_);
             conn->set_connected(true);
+            conn->set_conn_id(++next_conn_id_);
+            conn->set_idle_timeout(30);
             conn->start(); // start to wait read data from network
+            if (on_accept_callback_) on_accept_callback_(conn);
             do_accept();
         });
     }
 
   private:
     std::atomic_bool is_running_ = false;                   // check is running, prevent multiple call run functions
-    std::atomic_bool is_registered_to_zk_ = false;                // check is registered to zookeeper, prevent multiple call register_to_Zk functions
     std::atomic_size_t next_ioc_index_ = 0;               // use atomic ensure thread safe
     std::atomic_size_t next_work_index_ = 0;
+    std::atomic<uint64_t> next_conn_id_ = 1;
     std::vector<std::shared_ptr<asio::io_context>> iocs_;   // io pool
     size_t io_count_ = 0;                                  // io context count
     std::vector<std::thread> thread_pool_;                  // thread pool
     std::vector<std::shared_ptr<asio::io_context::work>> workds_;
     std::shared_ptr<tcp::acceptor> acceptor_;
 
-    Zookeeperutil zk_client_;     // zookeeper端口（自动获取/手动设置）
     std::string local_ip_;             // 本地服务端IP（自动获取/手动设置）
     uint64_t local_port_ = 0;          // 本地服务端端口（自动获取/手动设置）
-    std::string server_name_{};          // 服务端名称（手动设置）
 
     mrpc::router router_;
+
+    accept_callback_type on_accept_callback_;
 };
 } // namespace mrpc
 

@@ -12,11 +12,6 @@ else()
     add_definitions(-g -O0 -Wall -std=c++2a)
     # 查找pthread线程库（Linux/macOS）
     find_package(Threads REQUIRED)
-    # 查找ZK多线程库
-    find_library(ZK_LIB zookeeper_mt PATHS /usr/lib /usr/local/lib)
-    if(NOT ZK_LIB)
-        message(FATAL_ERROR "zookeeper_mt library not found! Please install zookeeper dev package first.")
-    endif()
 endif()
 
 set(EXECUTABLE_OUTPUT_PATH      ${CMAKE_HOME_DIRECTORY}/bin/)
@@ -25,35 +20,36 @@ set(ASIO_INCLUDE_DIR            ${CMAKE_HOME_DIRECTORY}/third/asio-1.18.1/includ
 set(SPDLOG_INCLUDE_DIR          ${CMAKE_HOME_DIRECTORY}/third/spdlog/include/)
 set(WLOG_INCLUDE_DIR            ${CMAKE_HOME_DIRECTORY}/third/wlog/include/)
 set(NLOHMANN_INCLUDE_DIR        ${CMAKE_HOME_DIRECTORY}/third/nlohmann/include/)
+set(SQLITE_ORM_INCLUDE_DIR      ${CMAKE_HOME_DIRECTORY}/third/sqlite_orm/include/)
 
 message(VERBOSE "rpc        directory: " ${RPC_INCLUDE_DIR})
 message(VERBOSE "asio       directory: " ${ASIO_INCLUDE_DIR})
 message(VERBOSE "spdlog     directory: " ${SPDLOG_INCLUDE_DIR})
 message(VERBOSE "wlog       directory: " ${WLOG_INCLUDE_DIR})
 message(VERBOSE "nlohmann   directory: " ${NLOHMANN_INCLUDE_DIR})
-message(VERBOSE "zookeeper  library: " ${ZK_LIB})
-
 include_directories(
     ${RPC_INCLUDE_DIR}
     ${ASIO_INCLUDE_DIR}
     ${SPDLOG_INCLUDE_DIR}
     ${WLOG_INCLUDE_DIR}
     ${NLOHMANN_INCLUDE_DIR}
+    ${SQLITE_ORM_INCLUDE_DIR}
 )
 
 link_libraries(
-        ${ZK_LIB}
         Threads::Threads
 )
 
 # 递归查找example下的所有子项目
 # add_subdirectory(${CMAKE_HOME_DIRECTORY}/example/async_call_client)
 # add_subdirectory(${CMAKE_HOME_DIRECTORY}/example/block_call_client)
-# add_subdirectory(${CMAKE_HOME_DIRECTORY}/example/coro_call_client)
-# add_subdirectory(${CMAKE_HOME_DIRECTORY}/example/server_register)
+add_subdirectory(${CMAKE_HOME_DIRECTORY}/example/coro_call_client)
+add_subdirectory(${CMAKE_HOME_DIRECTORY}/example/server_register)
 # add_subdirectory(${CMAKE_HOME_DIRECTORY}/example/two_way_call)
 
 # 聊天室服务器
 add_executable(chat_server ${CMAKE_HOME_DIRECTORY}/chatting_room/server.cpp)
+target_include_directories(chat_server PRIVATE ${CMAKE_HOME_DIRECTORY}/chatting_room)
+target_link_libraries(chat_server PRIVATE hiredis sqlite3)
 # 聊天室客户端
 add_executable(chat_client ${CMAKE_HOME_DIRECTORY}/chatting_room/client.cpp)

@@ -201,6 +201,39 @@ class connection : public std::enable_shared_from_this<connection> {
         closed_callback_ = callback;
     }
 
+    /// 服务端：设置空闲超时（秒），超时未收到消息则自动断开
+    void set_idle_timeout(int seconds) {
+        idle_timeout_seconds_ = seconds;
+        update_last_active();
+        if (seconds > 0) start_idle_monitor();
+    }
+
+    /// 客户端：启动心跳保活（秒），定期发送心跳包
+    void start_heartbeat(int interval_seconds) {
+        heartbeat_interval_ = interval_seconds;
+        if (!has_connected_) return;
+        do_heartbeat();
+    }
+
+    /// 停止心跳
+    void stop_heartbeat() {
+        if (heartbeat_timer_) {
+            std::error_code ec;
+            heartbeat_timer_->cancel(ec);
+        }
+    }
+
+    void update_last_active() {
+        last_active_time_ = std::chrono::steady_clock::now();
+    }
+
+    std::string get_peer_ip() {
+        std::error_code ec;
+        auto ep = socket_.remote_endpoint(ec);
+        if (ec) return "";
+        return ep.address().to_string();
+    }
+
     void start() {
         do_read_header();
     }
@@ -442,6 +475,7 @@ task_awaitable<RET> coro_call(const std::string& rpc_name, Args&&...args) {
     }
 
     void on_closed() {
+        has_connected_ = false;
         if (socket_.is_open()) {
             std::error_code ec;
             socket_.shutdown(asio::socket_base::shutdown_both, ec);
@@ -524,6 +558,8 @@ task_awaitable<RET> coro_call(const std::string& rpc_name, Args&&...args) {
                 }
             }
 
+            update_last_active();
+
             if (msg_body_.length() > MAX_MSG_SHRINK_LEN) {
                 // 正常消息不超过1KB, 超过
                 msg_body_.resize(MAX_MSG_SHRINK_LEN);
@@ -570,6 +606,39 @@ task_awaitable<RET> coro_call(const std::string& rpc_name, Args&&...args) {
         } else {
 			LOG_ERROR("recv unknow rpc response, msg id: {}", id);
         }
+    }
+
+    void start_idle_monitor() {
+        if (!has_connected_) return;
+        idle_timer_ = std::make_unique<asio::steady_timer>(socket_.get_executor());
+        auto self = shared_from_this();
+        idle_timer_->expires_after(std::chrono::seconds(std::max(1, idle_timeout_seconds_ / 3)));
+        idle_timer_->async_wait([this, self](std::error_code ec) {
+            if (ec) return;
+            if (!has_connected_) return;
+            auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+                std::chrono::steady_clock::now() - last_active_time_).count();
+            if (elapsed >= idle_timeout_seconds_) {
+                LOG_WARN("连接空闲超时 ({}s)，断开", elapsed);
+                on_closed();
+                return;
+            }
+            start_idle_monitor();
+        });
+    }
+
+    void do_heartbeat() {
+        if (!has_connected_) return;
+        heartbeat_timer_ = std::make_unique<asio::steady_timer>(socket_.get_executor());
+        auto self = shared_from_this();
+        heartbeat_timer_->expires_after(std::chrono::seconds(heartbeat_interval_));
+        heartbeat_timer_->async_wait([this, self](std::error_code ec) {
+            if (ec) return;
+            if (!has_connected_) return;
+            msg_id_t id{ (1 << MSG_IS_HEARTBEAT), 0, 0 };
+            write(id, nlohmann::json());
+            do_heartbeat();
+        });
     }
 
     void on_callback_response(msg_id_t id) {
@@ -711,6 +780,11 @@ task_awaitable<RET> coro_call(const std::string& rpc_name, Args&&...args) {
 	std::deque<std::pair<msg_id_t, std::string>> write_queue_;
 	uint32_t write_size_ = 0;
     void* user_data_ = nullptr;
+    std::chrono::steady_clock::time_point last_active_time_;
+    std::unique_ptr<asio::steady_timer> idle_timer_;
+    int idle_timeout_seconds_ = 0;
+    std::unique_ptr<asio::steady_timer> heartbeat_timer_;
+    int heartbeat_interval_ = 0;
 }; // class connection
 
 //特化模板，将connection::cptr识别为connection的智能指针类型

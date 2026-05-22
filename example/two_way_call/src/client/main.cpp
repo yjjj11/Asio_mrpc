@@ -29,7 +29,13 @@ int main() {
              }
     });
 
-    auto ret = client.call<uint32_t>("test_not_impl", 11, 12);
+    auto conn = client.connect("127.0.0.1", 3333);
+    if (!conn) {
+        std::cerr << "连接服务器失败!" << std::endl;
+        client.shutdown();
+        return 1;
+    }
+    auto ret = conn->call<uint32_t>("test_not_impl", 11, 12);
     if (ret.error_code() == mrpc::ok) {
         std::cout << "return: " << ret.value() << std::endl;
     } else {

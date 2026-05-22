@@ -39,7 +39,6 @@ int main() {
     wlog::logger::get().init("logs/_test.log");
     auto& server = server::get();
     server.set_ip_port("127.0.0.1", 3333);
-    server.set_server_name("test_server");
     server.run();
     //非成员函数无指定工作线程
     server.reg_func("test_add", test_add);
