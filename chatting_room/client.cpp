@@ -268,6 +268,31 @@ void save_cursors(const std::string& username) {
     }
 }
 
+// ==================== Token 持久化 ====================
+
+// 从 session 文件读取 token
+std::string load_session_token() {
+    std::ifstream f("session_token.txt");
+    if (!f) return {};
+    std::string line;
+    if (!std::getline(f, line)) return {};
+    auto pos = line.rfind(':');
+    if (pos == std::string::npos) return {};
+    return line.substr(pos + 1); // 返回 token 部分
+}
+
+// 保存 username:token 到 session 文件
+void save_session_token(const std::string& username, const std::string& token) {
+    std::ofstream f("session_token.txt");
+    if (!f) return;
+    f << username << ":" << token << "\n";
+}
+
+// 删除 session 文件
+void remove_session_token() {
+    std::remove("session_token.txt");
+}
+
 // 聊天界面 (推送模式)
 void chat_room(std::shared_ptr<connection> conn, const std::string& my_name, const std::string& target_name) {
     if (g_server_offline) {
@@ -557,7 +582,9 @@ void online_user_hub(std::shared_ptr<connection> conn, const std::string& userna
 
         if (input == "q" || input == "quit" || input == "exit") {
             save_cursors(username);
-            conn->notify("user_logout", username);
+            // 通知服务端下线并清除 token
+            conn->notify("user_logout", username, load_session_token());
+            remove_session_token();
             {
                 std::lock_guard<std::mutex> lock(g_online_cache_mutex);
                 g_online_users_cache.clear();
@@ -666,6 +693,44 @@ int main() {
     std::string current_username;
     bool is_logged_in = false;
 
+    // === 尝试 token 自动登录 ===
+    {
+        std::ifstream sf("session_token.txt");
+        if (sf) {
+            std::string line;
+            if (std::getline(sf, line)) {
+                auto pos = line.rfind(':');
+                if (pos != std::string::npos) {
+                    std::string saved_user = line.substr(0, pos);
+                    std::string saved_token = line.substr(pos + 1);
+                    auto ret = conn->call<std::string>("token_login", saved_token);
+                    if (ret.error_code() == 200 && !ret.value().empty()) {
+                        current_username = ret.value();
+                        is_logged_in = true;
+                        g_self_username = current_username;
+
+                        // 保存最新 username:token（万一 username 有变化）
+                        save_session_token(current_username, saved_token);
+
+                        load_cursors(current_username);
+                        auto init_ret = conn->call<std::vector<std::string>>("get_online_users");
+                        if (init_ret.error_code() == 200) {
+                            std::lock_guard<std::mutex> lock(g_online_cache_mutex);
+                            g_online_users_cache = init_ret.value();
+                        }
+
+                        // 直接进入 hub
+                        online_user_hub(conn, current_username);
+                        // 从 hub 退出
+                        is_logged_in = false;
+                        g_self_username.clear();
+                        current_username.clear();
+                    }
+                }
+            }
+        }
+    }
+
     while (true) {
         clear_screen();
         print_menu();
@@ -689,8 +754,10 @@ int main() {
                 std::cin >> password;
 
                 std::cout << " 正在登录..." << std::endl;
-                auto ret = conn->call<bool>("user_login", current_username, password);
-                if (ret.error_code() == 200 && ret.value()) {
+                auto ret = conn->call<std::string>("user_login", current_username, password);
+                if (ret.error_code() == 200 && !ret.value().empty()) {
+                    // 保存 token 到本地文件
+                    save_session_token(current_username, ret.value());
                     std::cout << " \033[32m登录成功！\033[0m 欢迎 " << current_username << " 加入聊天室！" << std::endl;
                     std::this_thread::sleep_for(std::chrono::milliseconds(500));
                     is_logged_in = true;
@@ -832,7 +899,8 @@ int main() {
                 if (is_logged_in && !current_username.empty()) {
                     save_cursors(current_username);
                     std::cout << " 正在为用户 " << current_username << " 下线..." << std::endl;
-                    conn->notify("user_logout", current_username);
+                    conn->notify("user_logout", current_username, load_session_token());
+                    remove_session_token();
                     std::cout << " \033[32m下线成功！\033[0m" << std::endl;
                 }
                 std::cout << " 正在断开连接..." << std::endl;

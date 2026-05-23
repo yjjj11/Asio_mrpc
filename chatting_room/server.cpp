@@ -5,6 +5,9 @@
 #include <shared_mutex>
 #include <tuple>
 #include <algorithm>
+#include <random>
+#include <sstream>
+#include <iomanip>
 #include <asio/signal_set.hpp>
 #include "redis_inbox.hpp"
 #include "sqlsave.hpp"
@@ -48,17 +51,28 @@ struct P2PAddr {
 std::unordered_map<std::string, P2PAddr> g_user_p2p_addr;
 std::shared_mutex g_p2p_mutex;
 
-// 用户注册（密码由 SQLite 哈希存储）
+/// 生成随机 token（32 字符 hex）
+std::string generate_token() {
+    static std::random_device rd;
+    static std::mt19937_64 gen(rd());
+    std::uniform_int_distribution<uint64_t> dis;
+    std::ostringstream oss;
+    oss << std::hex << std::setw(16) << std::setfill('0') << dis(gen)
+        << std::setw(16) << std::setfill('0') << dis(gen);
+    return oss.str();
+}
+
+// 用户注册
 bool register_user(connection::cptr conn, const std::string& username, const std::string& password) {
     return g_sqlite.register_user(username, password);
 }
 
-// 用户登录处理函数（验证密码）
-bool user_login(connection::cptr conn, const std::string& username, const std::string& password) {
+// 用户登录处理函数（验证密码，返回 token）
+std::string user_login(connection::cptr conn, const std::string& username, const std::string& password) {
     // 验证密码
     if (!g_sqlite.verify_user(username, password)) {
         LOG_WARN("用户 {} 登录失败：密码错误或用户不存在", username);
-        return false;
+        return {};
     }
 
     std::unique_lock<std::shared_mutex> lock(g_online_mutex);
@@ -66,8 +80,12 @@ bool user_login(connection::cptr conn, const std::string& username, const std::s
     // 检查用户是否已在线
     if (g_online_users.find(username) != g_online_users.end()) {
         LOG_WARN("用户 {} 已在线，拒绝重复登录", username);
-        return false;
+        return {};
     }
+
+    // 生成 token 并存入 Redis（30 分钟 TTL）
+    std::string token = generate_token();
+    g_inbox.save_token(token, username);
 
     // 加入在线列表
     g_online_users[username] = conn;
@@ -76,7 +94,38 @@ bool user_login(connection::cptr conn, const std::string& username, const std::s
 
     broadcast_user_status(username, true);
 
-    return true;
+    return token;
+}
+
+// Token 自动登录
+std::string token_login(connection::cptr conn, const std::string& token) {
+    // 验证 token
+    std::string username = g_inbox.verify_token(token);
+    if (username.empty()) {
+        LOG_WARN("token 登录失败：token 无效或已过期");
+        return {};
+    }
+
+    std::unique_lock<std::shared_mutex> lock(g_online_mutex);
+
+    // 如果已在在线列表，更新连接指针
+    auto it = g_online_users.find(username);
+    if (it != g_online_users.end()) {
+        LOG_INFO("用户 {} token 重连，更新连接", username);
+        it->second = conn;
+    } else {
+        g_online_users[username] = conn;
+    }
+
+    // 刷新 token TTL
+    g_inbox.save_token(token, username);
+
+    LOG_INFO("用户 {} token 自动登录成功，当前在线人数: {}", username, g_online_users.size());
+    lock.unlock();
+
+    broadcast_user_status(username, true);
+
+    return username;
 }
 
 // 获取在线用户列表
@@ -90,7 +139,12 @@ std::vector<std::string> get_online_users(connection::cptr conn) {
 }
 
 // 用户下线处理函数
-bool user_logout(connection::cptr conn, const std::string& username) {
+bool user_logout(connection::cptr conn, const std::string& username, const std::string& token) {
+    // 清除 Redis 中的 token
+    if (!token.empty()) {
+        g_inbox.delete_token(token);
+    }
+
     std::unique_lock<std::shared_mutex> lock(g_online_mutex);
 
     auto it = g_online_users.find(username);
@@ -333,6 +387,7 @@ int main() {
     // 注册RPC函数
     server.reg_func("register_user", register_user);
     server.reg_func("user_login", user_login);
+    server.reg_func("token_login", token_login);
     server.reg_func("user_logout", user_logout);
     server.reg_func("get_online_users", get_online_users);
     server.reg_func("send_message", send_message);

@@ -202,6 +202,46 @@ public:
     }
 
     /// ZREVRANGEBYSCORE key (before_seq -inf WITHSCORES LIMIT 0 limit
+    /// SETEX token:<token> ttl <username>
+    bool save_token(const std::string& token, const std::string& username, int ttl = 1800) {
+        std::lock_guard<std::mutex> lock(mtx_);
+        std::string key = "token:" + token;
+        const char* av[] = {"SETEX", key.c_str(), std::to_string(ttl).c_str(), username.c_str()};
+        size_t al[] = {5, key.size(), static_cast<size_t>(std::to_string(ttl).size()), username.size()};
+        auto* r = (redisReply*)redisCommandArgv(ctx_, 4, av, al);
+        if (!r) return false;
+        freeReplyObject(r);
+        return true;
+    }
+
+    /// GET token:<token> → username or ""
+    std::string verify_token(const std::string& token) {
+        std::lock_guard<std::mutex> lock(mtx_);
+        std::string key = "token:" + token;
+        const char* av[] = {"GET", key.c_str()};
+        size_t al[] = {3, key.size()};
+        auto* r = (redisReply*)redisCommandArgv(ctx_, 2, av, al);
+        if (!r || r->type != REDIS_REPLY_STRING) {
+            if (r) freeReplyObject(r);
+            return {};
+        }
+        std::string username(r->str);
+        freeReplyObject(r);
+        return username;
+    }
+
+    /// DEL token:<token>
+    bool delete_token(const std::string& token) {
+        std::lock_guard<std::mutex> lock(mtx_);
+        std::string key = "token:" + token;
+        const char* av[] = {"DEL", key.c_str()};
+        size_t al[] = {3, key.size()};
+        auto* r = (redisReply*)redisCommandArgv(ctx_, 2, av, al);
+        if (!r) return false;
+        freeReplyObject(r);
+        return true;
+    }
+
     /// 返回 seq <= before_seq 的消息，DESC 降序（最新在前）
     std::vector<std::tuple<uint64_t, std::string, std::string, std::string>> pull_before(
         const std::string& user_a, const std::string& user_b,
