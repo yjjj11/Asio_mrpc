@@ -22,6 +22,22 @@ struct User {
     std::string password_hash;
 };
 
+/// 好友请求结构体
+struct FriendRequest {
+    int id;
+    std::string from_user;
+    std::string to_user;
+    std::string status;  // "pending", "accepted", "rejected"
+    int64_t created_at;
+};
+
+/// 好友关系结构体
+struct Friendship {
+    std::string user_a;  // 字典序小者
+    std::string user_b;  // 字典序大者
+    int64_t created_at;
+};
+
 /// 构建 sqlite_orm storage（分离用于类型推导）
 inline auto make_message_storage(const std::string& path) {
     using namespace sqlite_orm;
@@ -36,6 +52,19 @@ inline auto make_message_storage(const std::string& path) {
         make_table("users",
             make_column("username", &User::username, primary_key()),
             make_column("password_hash", &User::password_hash)
+        ),
+        make_table("friend_requests",
+            make_column("id", &FriendRequest::id, primary_key().autoincrement()),
+            make_column("from_user", &FriendRequest::from_user),
+            make_column("to_user", &FriendRequest::to_user),
+            make_column("status", &FriendRequest::status),
+            make_column("created_at", &FriendRequest::created_at)
+        ),
+        make_table("friends",
+            make_column("user_a", &Friendship::user_a),
+            make_column("user_b", &Friendship::user_b),
+            make_column("created_at", &Friendship::created_at),
+            primary_key(&Friendship::user_a, &Friendship::user_b)
         )
     );
 }
@@ -161,5 +190,148 @@ public:
             where(c(&User::username) == username)
         );
         return !users.empty();
+    }
+
+    // ========== 好友系统 ==========
+
+    /// 搜索用户（关键字模糊匹配）
+    std::vector<std::string> search_users(const std::string& keyword, const std::string& self, size_t max_count = 20) {
+        using namespace sqlite_orm;
+        std::lock_guard<std::mutex> lock(mtx_);
+        auto users = storage_->get_all<User>(
+            where(like(&User::username, "%" + keyword + "%") and
+                  c(&User::username) != self),
+            limit(static_cast<int>(max_count))
+        );
+        std::vector<std::string> result;
+        result.reserve(users.size());
+        for (auto& u : users) result.push_back(std::move(u.username));
+        return result;
+    }
+
+    /// 发送好友请求：返回 true 表示成功，false 表示已存在 pending 请求或已是好友
+    bool send_friend_request(const std::string& from, const std::string& to) {
+        using namespace sqlite_orm;
+        std::lock_guard<std::mutex> lock(mtx_);
+
+        // 检查是否已是好友
+        auto [a, b] = friend_pair(from, to);
+        auto existing_friends = storage_->get_all<Friendship>(
+            where(c(&Friendship::user_a) == a and c(&Friendship::user_b) == b)
+        );
+        if (!existing_friends.empty()) return false;
+
+        // 检查是否有 pending 请求已存在
+        auto existing_reqs = storage_->get_all<FriendRequest>(
+            where(c(&FriendRequest::from_user) == from and
+                  c(&FriendRequest::to_user) == to and
+                  c(&FriendRequest::status) == "pending")
+        );
+        if (!existing_reqs.empty()) return false;
+
+        // 检查反向是否有 pending 请求（对方已经发过）
+        auto reverse_reqs = storage_->get_all<FriendRequest>(
+            where(c(&FriendRequest::from_user) == to and
+                  c(&FriendRequest::to_user) == from and
+                  c(&FriendRequest::status) == "pending")
+        );
+        if (!reverse_reqs.empty()) {
+            // 对方已经发过请求，自动接受
+            for (auto& r : reverse_reqs) {
+                r.status = "accepted";
+                storage_->update(r);
+            }
+            storage_->replace(Friendship{a, b, std::time(nullptr)});
+            return true;
+        }
+
+        storage_->insert(FriendRequest{0, from, to, "pending", std::time(nullptr)});
+        return true;
+    }
+
+    /// 获取待处理的好友请求（别人发给我的）
+    std::vector<FriendRequest> get_pending_requests(const std::string& username) {
+        using namespace sqlite_orm;
+        std::lock_guard<std::mutex> lock(mtx_);
+        return storage_->get_all<FriendRequest>(
+            where(c(&FriendRequest::to_user) == username and
+                  c(&FriendRequest::status) == "pending"),
+            order_by(&FriendRequest::created_at).desc()
+        );
+    }
+
+    /// 获取已发送但未处理的请求
+    std::vector<FriendRequest> get_sent_requests(const std::string& username) {
+        using namespace sqlite_orm;
+        std::lock_guard<std::mutex> lock(mtx_);
+        return storage_->get_all<FriendRequest>(
+            where(c(&FriendRequest::from_user) == username and
+                  c(&FriendRequest::status) == "pending"),
+            order_by(&FriendRequest::created_at).desc()
+        );
+    }
+
+    /// 处理好友请求
+    bool handle_friend_request(int request_id, bool accept) {
+        using namespace sqlite_orm;
+        std::lock_guard<std::mutex> lock(mtx_);
+
+        auto requests = storage_->get_all<FriendRequest>(
+            where(c(&FriendRequest::id) == request_id and
+                  c(&FriendRequest::status) == "pending")
+        );
+        if (requests.empty()) return false;
+        auto& req = requests[0];
+
+        if (accept) {
+            req.status = "accepted";
+            storage_->update(req);
+            auto [a, b] = friend_pair(req.from_user, req.to_user);
+            storage_->replace(Friendship{a, b, std::time(nullptr)});
+        } else {
+            req.status = "rejected";
+            storage_->update(req);
+        }
+        return true;
+    }
+
+    /// 获取好友列表
+    std::vector<std::string> get_friends(const std::string& username) {
+        using namespace sqlite_orm;
+        std::lock_guard<std::mutex> lock(mtx_);
+        auto rows = storage_->get_all<Friendship>(
+            where(c(&Friendship::user_a) == username or
+                  c(&Friendship::user_b) == username)
+        );
+        std::vector<std::string> result;
+        result.reserve(rows.size());
+        for (auto& f : rows) {
+            if (f.user_a == username)
+                result.push_back(std::move(f.user_b));
+            else
+                result.push_back(std::move(f.user_a));
+        }
+        return result;
+    }
+
+    /// 获取存储引用（供 server.cpp 需要直接查询时使用）
+    Storage& get_storage() { return *storage_; }
+
+    /// 检查是否已是好友
+    bool is_friend(const std::string& a, const std::string& b) {
+        using namespace sqlite_orm;
+        std::lock_guard<std::mutex> lock(mtx_);
+        auto [sa, sb] = friend_pair(a, b);
+        auto rows = storage_->get_all<Friendship>(
+            where(c(&Friendship::user_a) == sa and c(&Friendship::user_b) == sb)
+        );
+        return !rows.empty();
+    }
+
+private:
+    /// 返回字典序的（小, 大）对，用于 friends 表
+    static std::pair<std::string, std::string> friend_pair(const std::string& a, const std::string& b) {
+        if (a < b) return {a, b};
+        return {b, a};
     }
 };

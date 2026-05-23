@@ -8,8 +8,12 @@
 #include <vector>
 #include <tuple>
 #include <unordered_set>
+#include <unordered_map>
 #include <algorithm>
 #include <fstream>
+#include <sstream>
+#include <cstdint>
+#include <set>
 
 using namespace mrpc;
 
@@ -54,6 +58,17 @@ std::mutex g_pull_cursor_mutex;
 // 各会话未读消息数（在 hub 界面显示 【N条新消息】）
 std::unordered_map<std::string, size_t> g_unread_counts;
 std::mutex g_unread_mutex;
+
+// 好友列表
+std::vector<std::string> g_friends_list;
+std::mutex g_friends_mutex;
+
+// 待处理的好友请求 (request_id, from_user, created_at)
+std::vector<std::tuple<int, std::string, int64_t>> g_pending_requests;
+std::mutex g_req_mutex;
+
+// 前向声明
+static bool is_online(const std::string& username);
 
 // 清屏
 void clear_screen() {
@@ -101,40 +116,86 @@ void redraw_chat_ui(const std::string& target_name) {
     std::cout << " > " << std::flush;
 }
 
-// 绘制 Hub 主界面（在线用户列表）
+// 绘制 Hub 主界面（好友列表 + 在线用户列表 + 未读数）
 void draw_hub_ui() {
     clear_screen();
     std::cout << "========================================" << std::endl;
     std::cout << "           聊天室客户端                 " << std::endl;
     std::cout << "========================================" << std::endl;
     std::cout << " 当前用户: " << g_self_username << " [在线]" << std::endl;
+
+    // 显示待处理好友请求提醒
+    {
+        std::lock_guard<std::mutex> lk(g_req_mutex);
+        if (!g_pending_requests.empty()) {
+            std::cout << " \033[33m你有 " << g_pending_requests.size() << " 条待处理的好友请求！（输入 f 查看）\033[0m" << std::endl;
+        }
+    }
     std::cout << "========================================" << std::endl;
+
+    // 构建好友用户集合（快速查找）
+    std::set<std::string> friend_set;
+    {
+        std::lock_guard<std::mutex> lk(g_friends_mutex);
+        friend_set.insert(g_friends_list.begin(), g_friends_list.end());
+    }
+
+    // 在线非好友集合
+    std::vector<std::string> online_non_friends;
     {
         std::lock_guard<std::mutex> lock(g_online_cache_mutex);
-        std::vector<std::string> other_users;
         for (const auto& u : g_online_users_cache) {
-            if (u != g_self_username) other_users.push_back(u);
+            if (u != g_self_username && friend_set.find(u) == friend_set.end())
+                online_non_friends.push_back(u);
         }
-        if (other_users.empty()) {
-            std::cout << " 暂无其他在线用户" << std::endl;
-        } else {
-            std::lock_guard<std::mutex> lk(g_unread_mutex);
-            for (size_t i = 0; i < other_users.size(); ++i) {
-                std::cout << "  " << (i + 1) << ". " << other_users[i] << "【在线】";
-                auto it = g_unread_counts.find(other_users[i]);
-                if (it != g_unread_counts.end()) {
-                    if (it->second > 0) {
-                        std::cout << "\033[67G\033[31m【" << it->second << "条新消息】\033[0m";
-                    } else {
-                        std::cout << "\033[67G\033[31m【new】\033[0m";
-                    }
-                }
-                std::cout << std::endl;
+    }
+
+    // 构建完整的可聊天用户列表：好友（在线在前）+ 在线非好友
+    std::vector<std::string> chat_users;
+    std::vector<std::string> friend_status; // "【在线】" or "【离线】"
+    {
+        std::lock_guard<std::mutex> lk(g_friends_mutex);
+        // 好友：在线在前
+        for (const auto& f : g_friends_list) {
+            if (is_online(f)) {
+                chat_users.push_back(f);
+                friend_status.push_back("【在线】");
             }
+        }
+        for (const auto& f : g_friends_list) {
+            if (!is_online(f)) {
+                chat_users.push_back(f);
+                friend_status.push_back("【离线】");
+            }
+        }
+        // 在线非好友
+        for (const auto& u : online_non_friends) {
+            chat_users.push_back(u);
+            friend_status.push_back("【在线】");
+        }
+    }
+
+    if (chat_users.empty()) {
+        std::cout << " 暂无可聊天的用户" << std::endl;
+        std::cout << " 输入 f 搜索好友" << std::endl;
+    } else {
+        std::lock_guard<std::mutex> lk(g_unread_mutex);
+        for (size_t i = 0; i < chat_users.size(); ++i) {
+            std::cout << "  " << (i + 1) << ". " << chat_users[i] << friend_status[i];
+            // 未读消息计数
+            auto uit = g_unread_counts.find(chat_users[i]);
+            if (uit != g_unread_counts.end()) {
+                if (uit->second > 0) {
+                    std::cout << "\033[67G\033[31m【" << uit->second << "条新消息】\033[0m";
+                } else {
+                    std::cout << "\033[67G\033[31m【new】\033[0m";
+                }
+            }
+            std::cout << std::endl;
         }
     }
     std::cout << "----------------------------------------" << std::endl;
-    std::cout << " \033[36m[输入编号私聊]  g-群聊  r-刷新  q-退出登录\033[0m" << std::endl;
+    std::cout << " \033[36m[输入编号私聊]  f-好友  g-群聊  r-刷新  q-退出登录\033[0m" << std::endl;
     std::cout << " > " << std::flush;
 }
 
@@ -249,6 +310,38 @@ int on_server_shutdown(connection::cptr conn) {
     return 0;
 }
 
+// ==================== 好友推送回调 ====================
+
+// 收到新的好友请求
+int on_new_friend_request(connection::cptr conn, const std::string& from_user) {
+    LOG_INFO("收到好友请求: {}", from_user);
+    // 追加到待处理列表（暂不保存 created_at，服务端为主）
+    {
+        // 检查是否已在列表中
+        std::lock_guard<std::mutex> lk(g_req_mutex);
+        for (const auto& [id, f, _] : g_pending_requests) {
+            if (f == from_user) return 0; // 已存在
+        }
+        // 没有 id，设 0 表示无 id（待刷新）
+        g_pending_requests.emplace_back(0, from_user, 0);
+    }
+    if (g_in_hub) draw_hub_ui();
+    return 0;
+}
+
+// 好友请求被接受
+int on_friend_request_accepted(connection::cptr conn, const std::string& by_user) {
+    LOG_INFO("好友请求已被接受: {}", by_user);
+    // 刷新好友列表
+    auto ret = conn->call<std::vector<std::string>>("get_friends", g_self_username);
+    if (ret.error_code() == 200) {
+        std::lock_guard<std::mutex> lk(g_friends_mutex);
+        g_friends_list = ret.value();
+    }
+    if (g_in_hub) draw_hub_ui();
+    return 0;
+}
+
 // 从文件恢复游标（per-conversation 增量拉取进度）
 void load_cursors(const std::string& username) {
     std::ifstream f("cursor_" + username + ".txt");
@@ -333,6 +426,168 @@ void fetch_unread_counts(std::shared_ptr<connection> conn, const std::string& us
         } else if (cursor == 0) {
             // 从未进入过的会话，标记为 new（无数字）
             g_unread_counts[partner] = 0;
+        }
+    }
+}
+
+// ==================== 好友系统 UI ====================
+
+// 辅助函数：检查用户名是否在在线缓存中
+static bool is_online(const std::string& username) {
+    std::lock_guard<std::mutex> lock(g_online_cache_mutex);
+    return std::find(g_online_users_cache.begin(), g_online_users_cache.end(), username) != g_online_users_cache.end();
+}
+
+// 好友管理菜单
+void draw_friend_menu(std::shared_ptr<connection> conn, const std::string& username) {
+    while (true) {
+        clear_screen();
+        std::cout << "========================================" << std::endl;
+        std::cout << "           好友管理                    " << std::endl;
+        std::cout << "========================================" << std::endl;
+        std::cout << " 1. 搜索用户" << std::endl;
+        std::cout << " 2. 查看好友请求" << std::endl;
+        std::cout << " 3. 查看已发送的请求" << std::endl;
+        std::cout << " 4. 刷新好友列表" << std::endl;
+        std::cout << " 5. 返回" << std::endl;
+        std::cout << "========================================" << std::endl;
+        std::cout << " 请选择操作: ";
+
+        std::string input;
+        std::cin >> input;
+        if (std::cin.fail()) {
+            std::cin.clear();
+            if (std::cin.eof()) return;
+            std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+            continue;
+        }
+
+        if (input == "1") {
+            // 搜索用户
+            clear_screen();
+            std::cout << "=============== 搜索用户 ===============" << std::endl;
+            std::cout << " 请输入用户名关键字: ";
+            std::string keyword;
+            std::cin >> keyword;
+
+            auto ret = conn->call<std::vector<std::string>>("search_users", keyword, username);
+            if (ret.error_code() != 200 || ret.value().empty()) {
+                std::cout << " \033[33m未找到匹配的用户\033[0m" << std::endl;
+                press_any_key();
+                continue;
+            }
+
+            auto users = ret.value();
+            std::cout << " 匹配到 " << users.size() << " 个用户:" << std::endl;
+            std::cout << "----------------------------------------" << std::endl;
+            for (size_t i = 0; i < users.size(); ++i) {
+                std::cout << "  " << (i + 1) << ". " << users[i];
+                if (is_online(users[i]))
+                    std::cout << " \033[32m【在线】\033[0m";
+                else
+                    std::cout << " \033[33m【离线】\033[0m";
+                std::cout << std::endl;
+            }
+            std::cout << "----------------------------------------" << std::endl;
+            std::cout << " 选择用户发送好友请求 (0 取消): ";
+
+            int choice;
+            std::cin >> choice;
+            if (std::cin.fail() || choice <= 0 || choice > (int)users.size()) {
+                std::cin.clear();
+                std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+                continue;
+            }
+
+            std::string target = users[choice - 1];
+            auto send_ret = conn->call<bool>("send_friend_request", username, target);
+            if (send_ret.error_code() == 200 && send_ret.value()) {
+                std::cout << " \033[32m好友请求已发送给 " << target << "\033[0m" << std::endl;
+            } else {
+                std::cout << " \033[33m发送失败：请求已存在或已是好友\033[0m" << std::endl;
+            }
+            press_any_key();
+
+        } else if (input == "2") {
+            // 查看待处理的好友请求
+            auto ret = conn->call<std::vector<std::tuple<int, std::string, int64_t>>>("get_pending_requests", username);
+            if (ret.error_code() != 200 || ret.value().empty()) {
+                std::cout << " \033[33m暂无待处理的好友请求\033[0m" << std::endl;
+                press_any_key();
+                continue;
+            }
+
+            auto reqs = ret.value();
+            clear_screen();
+            std::cout << "============ 好友请求 ============" << std::endl;
+            for (size_t i = 0; i < reqs.size(); ++i) {
+                auto& [id, from, ts] = reqs[i];
+                std::cout << " " << (i + 1) << ". " << from << std::endl;
+            }
+            std::cout << "----------------------------------------" << std::endl;
+            std::cout << " \033[36m选择请求编号处理 (0 返回)\033[0m" << std::endl;
+            std::cout << " > ";
+
+            int choice;
+            std::cin >> choice;
+            if (std::cin.fail() || choice <= 0 || choice > (int)reqs.size()) {
+                std::cin.clear();
+                std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+                continue;
+            }
+
+            auto& [req_id, req_from, _] = reqs[choice - 1];
+            std::cout << " 接受 " << req_from << " 的好友请求? (y/n): ";
+            std::string yn;
+            std::cin >> yn;
+            if (yn == "y" || yn == "Y") {
+                auto handle_ret = conn->call<bool>("handle_friend_request", req_id, true);
+                if (handle_ret.error_code() == 200 && handle_ret.value()) {
+                    std::cout << " \033[32m已添加 " << req_from << " 为好友！\033[0m" << std::endl;
+                    // 刷新好友列表
+                    auto f_ret = conn->call<std::vector<std::string>>("get_friends", username);
+                    if (f_ret.error_code() == 200) {
+                        std::lock_guard<std::mutex> lk(g_friends_mutex);
+                        g_friends_list = f_ret.value();
+                    }
+                } else {
+                    std::cout << " \033[31m操作失败\033[0m" << std::endl;
+                }
+            } else {
+                conn->call<bool>("handle_friend_request", req_id, false);
+                std::cout << " \033[33m已拒绝\033[0m" << std::endl;
+            }
+            press_any_key();
+
+        } else if (input == "3") {
+            // 查看已发送的请求
+            auto ret = conn->call<std::vector<std::tuple<int, std::string, int64_t>>>("get_sent_requests", username);
+            if (ret.error_code() != 200 || ret.value().empty()) {
+                std::cout << " \033[33m暂无已发送的待处理请求\033[0m" << std::endl;
+                press_any_key();
+                continue;
+            }
+
+            clear_screen();
+            std::cout << "========== 已发送的请求 ==========" << std::endl;
+            for (auto& [id, to, ts] : ret.value()) {
+                std::cout << "  → " << to << " \033[33m[等待接受]\033[0m" << std::endl;
+            }
+            std::cout << "----------------------------------------" << std::endl;
+            press_any_key();
+
+        } else if (input == "4") {
+            // 刷新好友列表
+            auto ret = conn->call<std::vector<std::string>>("get_friends", username);
+            if (ret.error_code() == 200) {
+                std::lock_guard<std::mutex> lk(g_friends_mutex);
+                g_friends_list = ret.value();
+                std::cout << " \033[32m好友列表已刷新\033[0m" << std::endl;
+            }
+            press_any_key();
+
+        } else if (input == "5" || input == "q") {
+            break;
         }
     }
 }
@@ -613,6 +868,24 @@ void group_chat_room(std::shared_ptr<connection> conn, const std::string& my_nam
 // 登录后的在线用户列表主界面
 void online_user_hub(std::shared_ptr<connection> conn, const std::string& username) {
     g_in_hub = true;
+
+    // 进入 hub 时初始化好友列表
+    {
+        auto ret = conn->call<std::vector<std::string>>("get_friends", username);
+        if (ret.error_code() == 200) {
+            std::lock_guard<std::mutex> lk(g_friends_mutex);
+            g_friends_list = ret.value();
+        }
+    }
+    // 初始化待处理好友请求
+    {
+        auto ret = conn->call<std::vector<std::tuple<int, std::string, int64_t>>>("get_pending_requests", username);
+        if (ret.error_code() == 200) {
+            std::lock_guard<std::mutex> lk(g_req_mutex);
+            g_pending_requests = ret.value();
+        }
+    }
+
     while (true) {
         draw_hub_ui();
 
@@ -637,7 +910,24 @@ void online_user_hub(std::shared_ptr<connection> conn, const std::string& userna
                 std::lock_guard<std::mutex> lk(g_unread_mutex);
                 g_unread_counts.clear();
             }
+            {
+                std::lock_guard<std::mutex> lk(g_friends_mutex);
+                g_friends_list.clear();
+            }
+            {
+                std::lock_guard<std::mutex> lk(g_req_mutex);
+                g_pending_requests.clear();
+            }
             break;
+        } else if (input == "f" || input == "F") {
+            if (g_server_offline) {
+                std::cout << "\033[31m[系统] 服务器已断开\033[0m" << std::endl;
+                std::this_thread::sleep_for(std::chrono::milliseconds(500));
+                continue;
+            }
+            g_in_hub = false;
+            draw_friend_menu(conn, username);
+            g_in_hub = true;
         } else if (input == "g" || input == "G") {
             if (g_server_offline) {
                 std::cout << "\033[31m[系统] 服务器已断开\033[0m" << std::endl;
@@ -667,19 +957,30 @@ void online_user_hub(std::shared_ptr<connection> conn, const std::string& userna
         } else {
             try {
                 int idx = std::stoi(input);
-                // 从本地缓存构建可聊天用户列表（排除自己）
-                std::vector<std::string> other_users;
+                // 构建可聊天用户列表（好友 + 在线非好友）
+                std::vector<std::string> chat_users;
+                std::vector<std::string> friends_copy;
+                {
+                    std::lock_guard<std::mutex> lk(g_friends_mutex);
+                    friends_copy = g_friends_list;
+                }
+                std::set<std::string> friend_set(friends_copy.begin(), friends_copy.end());
+                // 好友：在线在前
+                for (const auto& f : friends_copy)
+                    if (is_online(f)) chat_users.push_back(f);
+                for (const auto& f : friends_copy)
+                    if (!is_online(f)) chat_users.push_back(f);
+                // 在线非好友
                 {
                     std::lock_guard<std::mutex> lock(g_online_cache_mutex);
                     for (const auto& u : g_online_users_cache) {
-                        if (u != username) {
-                            other_users.push_back(u);
-                        }
+                        if (u != username && friend_set.find(u) == friend_set.end())
+                            chat_users.push_back(u);
                     }
                 }
-                if (idx >= 1 && idx <= (int)other_users.size()) {
+                if (idx >= 1 && idx <= (int)chat_users.size()) {
                     g_in_hub = false;
-                    chat_room(conn, username, other_users[idx - 1]);
+                    chat_room(conn, username, chat_users[idx - 1]);
                     g_in_hub = true;
                 }
             } catch (...) {
@@ -717,6 +1018,8 @@ int main() {
     client.router().reg_handle("on_group_message", on_group_message);
     client.router().reg_handle("on_user_status_changed", on_user_status_changed);
     client.router().reg_handle("on_server_shutdown", on_server_shutdown);
+    client.router().reg_handle("on_new_friend_request", on_new_friend_request);
+    client.router().reg_handle("on_friend_request_accepted", on_friend_request_accepted);
 
     // 连接到服务器
     clear_screen();

@@ -379,6 +379,82 @@ std::vector<std::tuple<std::string, uint64_t>> get_unread_info(
     return result;
 }
 
+// ==================== 好友系统 RPC ====================
+
+// 搜索用户（关键字模糊匹配，排除自己）
+std::vector<std::string> search_users(connection::cptr conn, const std::string& keyword, const std::string& self) {
+    return g_sqlite.search_users(keyword, self);
+}
+
+// 发送好友请求
+bool send_friend_request(connection::cptr conn, const std::string& from_user, const std::string& to_user) {
+    bool ok = g_sqlite.send_friend_request(from_user, to_user);
+    if (!ok) return false;
+
+    // 如果目标在线，推送通知
+    std::shared_lock<std::shared_mutex> lock(g_online_mutex);
+    auto it = g_online_users.find(to_user);
+    if (it != g_online_users.end()) {
+        it->second->async_call([](uint32_t, const std::string&, const nlohmann::json&){},
+            "on_new_friend_request", from_user);
+    }
+    return true;
+}
+
+// 获取待处理的好友请求（别人发给我的）
+std::vector<std::tuple<int, std::string, int64_t>> get_pending_requests(connection::cptr conn, const std::string& username) {
+    auto reqs = g_sqlite.get_pending_requests(username);
+    std::vector<std::tuple<int, std::string, int64_t>> result;
+    result.reserve(reqs.size());
+    for (auto& r : reqs)
+        result.emplace_back(r.id, std::move(r.from_user), r.created_at);
+    return result;
+}
+
+// 获取已发送但未处理的请求
+std::vector<std::tuple<int, std::string, int64_t>> get_sent_requests(connection::cptr conn, const std::string& username) {
+    auto reqs = g_sqlite.get_sent_requests(username);
+    std::vector<std::tuple<int, std::string, int64_t>> result;
+    result.reserve(reqs.size());
+    for (auto& r : reqs)
+        result.emplace_back(r.id, std::move(r.to_user), r.created_at);
+    return result;
+}
+
+// 按 ID 查询好友请求（供 handle_friend_request 推送用）
+static FriendRequest get_request_by_id(int request_id) {
+    using namespace sqlite_orm;
+    auto& st = g_sqlite.get_storage();
+    auto reqs = st.get_all<FriendRequest>(
+        where(c(&FriendRequest::id) == request_id)
+    );
+    if (reqs.empty()) return {};
+    return reqs[0];
+}
+
+// 处理好友请求
+bool handle_friend_request(connection::cptr conn, int request_id, bool accept) {
+    // 先查询请求信息，用于后续推送
+    FriendRequest req = get_request_by_id(request_id);
+    bool ok = g_sqlite.handle_friend_request(request_id, accept);
+    if (!ok) return false;
+
+    if (accept && !req.from_user.empty()) {
+        std::shared_lock<std::shared_mutex> lock(g_online_mutex);
+        auto it = g_online_users.find(req.from_user);
+        if (it != g_online_users.end()) {
+            it->second->async_call([](uint32_t, const std::string&, const nlohmann::json&){},
+                "on_friend_request_accepted", req.to_user);
+        }
+    }
+    return true;
+}
+
+// 获取好友列表
+std::vector<std::string> get_friends(connection::cptr conn, const std::string& username) {
+    return g_sqlite.get_friends(username);
+}
+
 int main() {
     wlog::logger::get().init("logs/chatting_room.log");
 
@@ -410,6 +486,14 @@ int main() {
     server.reg_func("sync_history", sync_history);
     server.reg_func("get_context_messages", get_context_messages);
     server.reg_func("get_unread_info", get_unread_info);
+
+    // 好友系统 RPC
+    server.reg_func("search_users", search_users);
+    server.reg_func("send_friend_request", send_friend_request);
+    server.reg_func("get_pending_requests", get_pending_requests);
+    server.reg_func("get_sent_requests", get_sent_requests);
+    server.reg_func("handle_friend_request", handle_friend_request);
+    server.reg_func("get_friends", get_friends);
 
     // 新连接回调：追踪连接 + 空闲超时断开时自动下线用户
     server.set_on_accept_callback([](std::shared_ptr<connection> conn) {
