@@ -7,12 +7,15 @@
 #include <atomic>
 #include <vector>
 #include <tuple>
+#include <unordered_set>
+#include <algorithm>
+#include <fstream>
 
 using namespace mrpc;
 
-// 持久化会话消息存储: target_user -> vector<(sender, message)>
-// sender 为对方用户名 或 "__me__"（自己发的消息），永不清理
-std::unordered_map<std::string, std::vector<std::pair<std::string, std::string>>> g_chat_history_map;
+// 持久化会话消息存储: target_user -> vector<(sender, message, seq_id)>
+// sender = "__me__"（自己）或对方用户名, seq_id=0 表示未知（仅用于渲染时去重）
+std::unordered_map<std::string, std::vector<std::tuple<std::string, std::string, uint64_t>>> g_chat_history_map;
 std::mutex g_chat_map_mutex;
 std::string g_current_chat_target;
 bool g_in_chat = false;
@@ -40,6 +43,18 @@ std::mutex g_conv_min_seq_mutex;
 std::unordered_map<std::string, uint64_t> g_conv_max_seq;
 std::mutex g_conv_max_seq_mutex;
 
+// 会话是否已完成上下文加载（首次进入时从 Redis 反向拉取或冷启动）
+std::unordered_set<std::string> g_conv_initialized;
+std::mutex g_conv_init_mutex;
+
+// 增量拉取游标（用于 sync_messages 的 after_seq，与推送跟踪 g_conv_max_seq 分离）
+std::unordered_map<std::string, uint64_t> g_pull_cursor;
+std::mutex g_pull_cursor_mutex;
+
+// 有新消息的会话（在 hub 界面显示 【new】 标识）
+std::unordered_set<std::string> g_users_new_msg;
+std::mutex g_users_new_msg_mutex;
+
 // 清屏
 void clear_screen() {
     system("clear");
@@ -56,7 +71,7 @@ void press_any_key() {
     std::cin.get();
 }
 
-// 重新渲染私聊界面
+// 重新渲染私聊界面（seq_id 去重，保证推送消息与拉取消息不会重复显示）
 void redraw_chat_ui(const std::string& target_name) {
     std::cout << "\033[H\033[2J" << std::flush;
     std::cout << "========================================" << std::endl;
@@ -66,17 +81,23 @@ void redraw_chat_ui(const std::string& target_name) {
 
     auto it = g_chat_history_map.find(target_name);
     if (it != g_chat_history_map.end()) {
+        LOG_INFO("redraw {}: {} total msgs", target_name, it->second.size());
+        std::unordered_set<uint64_t> seen;
         for (const auto& msg : it->second) {
-            if (msg.first == "__me__") {
-                std::cout << "\033[32m我\033[0m: " << msg.second << std::endl;
+            uint64_t sid = std::get<2>(msg);
+            if (sid > 0 && !seen.insert(sid).second) continue;
+            const auto& sender = std::get<0>(msg);
+            const auto& text = std::get<1>(msg);
+            if (sender == "__me__") {
+                std::cout << "\033[32m我\033[0m: " << text << std::endl;
             } else {
-                std::cout << "\033[34m" << msg.first << "\033[0m: " << msg.second << std::endl;
+                std::cout << "\033[34m" << sender << "\033[0m: " << text << std::endl;
             }
         }
     }
 
     std::cout << "----------------------------------------" << std::endl;
-    std::cout << " 输入消息 (输入 'quit' 退出): " << std::endl;
+    std::cout << " 输入消息 ('quit'退出, '-g'翻查历史): " << std::endl;
     std::cout << " > " << std::flush;
 }
 
@@ -97,8 +118,14 @@ void draw_hub_ui() {
         if (other_users.empty()) {
             std::cout << " 暂无其他在线用户" << std::endl;
         } else {
+            std::lock_guard<std::mutex> lk(g_users_new_msg_mutex);
             for (size_t i = 0; i < other_users.size(); ++i) {
-                std::cout << "  " << (i + 1) << ". " << other_users[i] << "【在线】" << std::endl;
+                std::cout << "  " << (i + 1) << ". " << other_users[i] << "【在线】";
+                if (g_users_new_msg.count(other_users[i])) {
+                    // 右对齐到与 q-退出登录 同一列
+                    std::cout << "\033[67G\033[31m【new】\033[0m";
+                }
+                std::cout << std::endl;
             }
         }
     }
@@ -128,11 +155,14 @@ void redraw_group_chat_ui() {
     std::cout << " > " << std::flush;
 }
 
-// 接收私聊消息的RPC回调（含 seq_id，用于更新已同步进度）
+// 接收私聊消息的RPC回调（含 seq_id，用于更新进度 + 渲染时去重）
 int on_message(connection::cptr conn, const std::string& from_user, const std::string& message, uint64_t seq_id) {
+    bool hub_user = false;
     {
         std::lock_guard<std::mutex> lock(g_chat_map_mutex);
-        g_chat_history_map[from_user].emplace_back(from_user, message);
+        LOG_INFO("on_message: from={}, msg={}, seq={}, map_size={}", from_user, message, seq_id,
+                 g_chat_history_map[from_user].size());
+        g_chat_history_map[from_user].emplace_back(from_user, message, seq_id);
         if (seq_id > g_last_seq_id) g_last_seq_id = seq_id;
         {
             std::lock_guard<std::mutex> lk(g_conv_min_seq_mutex);
@@ -148,9 +178,21 @@ int on_message(connection::cptr conn, const std::string& from_user, const std::s
                 g_conv_max_seq[from_user] = seq_id;
             }
         }
+        // 记录推送的 seq_id，供渲染时去重（redraw_chat_ui 按 seq_id 去重）
         if (g_in_chat && from_user == g_current_chat_target) {
             redraw_chat_ui(g_current_chat_target);
         }
+        if (g_in_hub) {
+            hub_user = true;
+        }
+    }
+    // 在 hub 界面时标记新消息并重绘 hub（不在 g_chat_map_mutex 内做 IO）
+    if (hub_user) {
+        {
+            std::lock_guard<std::mutex> lk(g_users_new_msg_mutex);
+            g_users_new_msg.insert(from_user);
+        }
+        draw_hub_ui();
     }
     return 0;
 }
@@ -203,6 +245,29 @@ int on_server_shutdown(connection::cptr conn) {
     return 0;
 }
 
+// 从文件恢复游标（per-conversation 增量拉取进度）
+void load_cursors(const std::string& username) {
+    std::ifstream f("cursor_" + username + ".txt");
+    if (!f) return;
+    std::string line;
+    std::lock_guard<std::mutex> lk(g_pull_cursor_mutex);
+    while (std::getline(f, line)) {
+        auto pos = line.rfind(':');
+        if (pos == std::string::npos) continue;
+        g_pull_cursor[line.substr(0, pos)] = std::stoull(line.substr(pos + 1));
+    }
+}
+
+// 保存游标到文件（增量拉取进度，供下次登录恢复）
+void save_cursors(const std::string& username) {
+    std::ofstream f("cursor_" + username + ".txt");
+    if (!f) return;
+    std::lock_guard<std::mutex> lk(g_pull_cursor_mutex);
+    for (const auto& [target, seq] : g_pull_cursor) {
+        f << target << ":" << seq << "\n";
+    }
+}
+
 // 聊天界面 (推送模式)
 void chat_room(std::shared_ptr<connection> conn, const std::string& my_name, const std::string& target_name) {
     if (g_server_offline) {
@@ -211,37 +276,94 @@ void chat_room(std::shared_ptr<connection> conn, const std::string& my_name, con
         return;
     }
 
-    // 进入聊天时拉取最近 10 条消息
+    // 进入聊天，清除该会话的新消息标识
     {
-        auto ret = conn->call<std::vector<std::tuple<uint64_t, std::string, std::string, std::string>>>(
-            "get_recent_messages", my_name, target_name, (size_t)10);
-        if (ret.error_code() == 200 && !ret.value().empty()) {
-            uint64_t known_max = 0;
-            {
-                std::lock_guard<std::mutex> lk(g_conv_max_seq_mutex);
-                auto it = g_conv_max_seq.find(target_name);
-                if (it != g_conv_max_seq.end()) known_max = it->second;
-            }
+        std::lock_guard<std::mutex> lk(g_users_new_msg_mutex);
+        g_users_new_msg.erase(target_name);
+    }
+
+    // 每次进入：增量拉取新消息（使用 g_pull_cursor，与推送跟踪 g_conv_max_seq 分离）
+    uint64_t after_seq = 0;
+    bool needs_context = false;
+    {
+        std::lock_guard<std::mutex> lk(g_pull_cursor_mutex);
+        auto it = g_pull_cursor.find(target_name);
+        if (it != g_pull_cursor.end()) after_seq = it->second;
+    }
+    {
+        std::lock_guard<std::mutex> lk(g_conv_init_mutex);
+        if (g_conv_initialized.find(target_name) == g_conv_initialized.end())
+            needs_context = true;
+    }
+
+    // 1. 首次进入该会话时，从 Redis 反向拉取 seq <= after_seq 的上下文（展示窗口用）
+    if (needs_context && after_seq > 0) {
+        auto ctx = conn->call<std::vector<std::tuple<uint64_t, std::string, std::string, std::string>>>(
+            "get_context_messages", my_name, target_name, after_seq, (size_t)10);
+        if (ctx.error_code() == 200 && !ctx.value().empty()) {
             std::lock_guard<std::mutex> lock(g_chat_map_mutex);
             uint64_t min_seq = UINT64_MAX;
-            for (auto& [seq_id, from, to, msg] : ret.value()) {
-                if (seq_id <= known_max) continue; // 推送已到达，跳过避免重复
-                if (from == my_name) {
-                    g_chat_history_map[target_name].emplace_back("__me__", msg);
-                } else {
-                    g_chat_history_map[target_name].emplace_back(from, msg);
-                }
-                if (seq_id > g_last_seq_id) g_last_seq_id = seq_id;
+            for (auto& [seq_id, from, to, msg] : ctx.value()) {
+                if (from == my_name)
+                    g_chat_history_map[target_name].emplace_back("__me__", msg, seq_id);
+                else
+                    g_chat_history_map[target_name].emplace_back(from, msg, seq_id);
                 if (seq_id < min_seq) min_seq = seq_id;
             }
             if (min_seq != UINT64_MAX) {
                 std::lock_guard<std::mutex> lk(g_conv_min_seq_mutex);
-                g_conv_min_seq[target_name] = min_seq;
+                auto it = g_conv_min_seq.find(target_name);
+                if (it == g_conv_min_seq.end() || min_seq < it->second)
+                    g_conv_min_seq[target_name] = min_seq;
             }
         }
     }
 
+    // 2. 增量拉取（seq > after_seq 的新消息）
+    {
+        auto ret = conn->call<std::vector<std::tuple<uint64_t, std::string, std::string, std::string>>>(
+            "sync_messages", my_name, target_name, after_seq, (size_t)50);
+        if (ret.error_code() == 200 && !ret.value().empty()) {
+            LOG_INFO("sync_messages returned {} msgs for {}", ret.value().size(), target_name);
+            std::lock_guard<std::mutex> lock(g_chat_map_mutex);
+            for (auto& [seq_id, from, to, msg] : ret.value()) {
+                if (from == my_name)
+                    g_chat_history_map[target_name].emplace_back("__me__", msg, seq_id);
+                else
+                    g_chat_history_map[target_name].emplace_back(from, msg, seq_id);
+                if (seq_id > g_conv_max_seq[target_name])
+                    g_conv_max_seq[target_name] = seq_id;
+                if (seq_id > g_last_seq_id) g_last_seq_id = seq_id;
+            }
+            // 更新拉取游标（取结果中最大 seq_id）
+            uint64_t max_seen = std::get<0>(ret.value().back());
+            {
+                std::lock_guard<std::mutex> lk(g_pull_cursor_mutex);
+                auto it = g_pull_cursor.find(target_name);
+                if (it == g_pull_cursor.end() || max_seen > it->second)
+                    g_pull_cursor[target_name] = max_seen;
+            }
+        }
+    }
+
+    // 按 seq_id 排序消息，确保推送消息（可能在向量前端）与同步消息（在末尾）不混乱
+    // 保证显示顺序 = 时间顺序（旧→新）
+    {
+        std::lock_guard<std::mutex> lock(g_chat_map_mutex);
+        auto& msgs = g_chat_history_map[target_name];
+        std::sort(msgs.begin(), msgs.end(), [](const auto& a, const auto& b) {
+            return std::get<2>(a) < std::get<2>(b);
+        });
+    }
+
+    // 3. 标记会话上下文已加载（首次进入完成）
+    {
+        std::lock_guard<std::mutex> lk(g_conv_init_mutex);
+        g_conv_initialized.insert(target_name);
+    }
+
     std::string input;
+    bool skip_redraw = false;
 
     {
         std::lock_guard<std::mutex> lock(g_chat_map_mutex);
@@ -249,17 +371,28 @@ void chat_room(std::shared_ptr<connection> conn, const std::string& my_name, con
         g_in_chat = true;
     }
 
-    // 清除输入缓冲区
-    std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+    // 首次进入：先绘制界面（不使用 cin.ignore 避免阻塞）
+    // hub 的 operator>> 遗留的 '\n' 由下面第一次 getline 消费并跳过
+    bool first_draw = true;
 
     while (true) {
-        // 重绘界面
-        {
+        if (std::cin.fail()) {
+            std::cin.clear();
+            std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+        }
+
+        // 重绘界面（-g 已完成显式重绘，跳过本次循环顶部的重绘）
+        if (!skip_redraw) {
             std::lock_guard<std::mutex> lock(g_chat_map_mutex);
             redraw_chat_ui(target_name);
         }
+        skip_redraw = false;
 
         std::getline(std::cin, input);
+        if (first_draw) {
+            first_draw = false;
+            if (input.empty()) continue; // 跳过 hub 遗留的空行
+        }
 
         if (input == "quit" || input == "exit") {
             break;
@@ -295,15 +428,21 @@ void chat_room(std::shared_ptr<connection> conn, const std::string& my_name, con
                         auto& [seq_id, from, to, msg] = *it;
                         auto pos = g_chat_history_map[target_name].begin();
                         if (from == my_name) {
-                            g_chat_history_map[target_name].emplace(pos, "__me__", msg);
+                            g_chat_history_map[target_name].emplace(pos, "__me__", msg, seq_id);
                         } else {
-                            g_chat_history_map[target_name].emplace(pos, from, msg);
+                            g_chat_history_map[target_name].emplace(pos, from, msg, seq_id);
                         }
                         if (seq_id < new_min) new_min = seq_id;
                     }
                     std::lock_guard<std::mutex> lk(g_conv_min_seq_mutex);
                     g_conv_min_seq[target_name] = new_min;
-                    redraw_chat_ui(target_name);
+
+                    // 显式重绘一次当前聊天界面（不回到上一层）
+                    {
+                        std::lock_guard<std::mutex> lock_redraw(g_chat_map_mutex);
+                        redraw_chat_ui(target_name);
+                    }
+                    skip_redraw = true; // 跳过 while 循环顶部的重复重绘
                 } else {
                     std::cout << "\033[33m没有更多历史消息\033[0m" << std::endl;
                     std::this_thread::sleep_for(std::chrono::milliseconds(500));
@@ -316,10 +455,35 @@ void chat_room(std::shared_ptr<connection> conn, const std::string& my_name, con
                 std::this_thread::sleep_for(std::chrono::milliseconds(500));
                 break;
             }
-            conn->notify("send_message", my_name, target_name, input);
+            auto send_ret = conn->call<uint64_t>("send_message", my_name, target_name, input);
+            uint64_t send_seq_id = (send_ret.error_code() == 200) ? send_ret.value() : 0;
             {
                 std::lock_guard<std::mutex> lock(g_chat_map_mutex);
-                g_chat_history_map[target_name].emplace_back("__me__", input);
+                g_chat_history_map[target_name].emplace_back("__me__", input, send_seq_id);
+                if (send_seq_id > 0) {
+                    if (send_seq_id > g_last_seq_id) g_last_seq_id = send_seq_id;
+                    {
+                        std::lock_guard<std::mutex> lk(g_conv_max_seq_mutex);
+                        auto it = g_conv_max_seq.find(target_name);
+                        if (it == g_conv_max_seq.end() || send_seq_id > it->second) {
+                            g_conv_max_seq[target_name] = send_seq_id;
+                        }
+                    }
+                    {
+                        std::lock_guard<std::mutex> lk(g_conv_min_seq_mutex);
+                        auto it = g_conv_min_seq.find(target_name);
+                        if (it == g_conv_min_seq.end() || send_seq_id < it->second) {
+                            g_conv_min_seq[target_name] = send_seq_id;
+                        }
+                    }
+                    // 更新拉取游标（自己发的消息也算已同步）
+                    {
+                        std::lock_guard<std::mutex> lk(g_pull_cursor_mutex);
+                        auto it = g_pull_cursor.find(target_name);
+                        if (it == g_pull_cursor.end() || send_seq_id > it->second)
+                            g_pull_cursor[target_name] = send_seq_id;
+                    }
+                }
             }
         }
     }
@@ -392,10 +556,15 @@ void online_user_hub(std::shared_ptr<connection> conn, const std::string& userna
         }
 
         if (input == "q" || input == "quit" || input == "exit") {
+            save_cursors(username);
             conn->notify("user_logout", username);
             {
                 std::lock_guard<std::mutex> lock(g_online_cache_mutex);
                 g_online_users_cache.clear();
+            }
+            {
+                std::lock_guard<std::mutex> lk(g_users_new_msg_mutex);
+                g_users_new_msg.clear();
             }
             break;
         } else if (input == "g" || input == "G") {
@@ -523,6 +692,9 @@ int main() {
                     is_logged_in = true;
                     g_self_username = current_username;
 
+                    // 恢复上次的游标（per-conversation 已同步的最大 seq_id）
+                    load_cursors(current_username);
+
                     // 初始化本地用户列表缓存
                     auto init_ret = conn->call<std::vector<std::string>>("get_online_users");
                     if (init_ret.error_code() == 200) {
@@ -634,6 +806,7 @@ int main() {
                 clear_screen();
                 std::cout << "============= 退出程序 ===============" << std::endl;
                 if (is_logged_in && !current_username.empty()) {
+                    save_cursors(current_username);
                     std::cout << " 正在为用户 " << current_username << " 下线..." << std::endl;
                     conn->notify("user_logout", current_username);
                     std::cout << " \033[32m下线成功！\033[0m" << std::endl;

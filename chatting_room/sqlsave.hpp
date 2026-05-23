@@ -84,4 +84,38 @@ public:
             limit(static_cast<int>(max_count))
         );
     }
+
+    /// seq_id > after_seq_id, ORDER BY seq_id ASC, LIMIT max_count
+    std::vector<Message> load_after(const std::string& user_a,
+                                    const std::string& user_b,
+                                    uint64_t after_seq_id,
+                                    size_t max_count = 50) {
+        using namespace sqlite_orm;
+        std::lock_guard<std::mutex> lock(mtx_);
+        return storage_->get_all<Message>(
+            where(
+                ((c(&Message::from_user) == user_a && c(&Message::to_user) == user_b) ||
+                 (c(&Message::from_user) == user_b && c(&Message::to_user) == user_a)) &&
+                c(&Message::seq_id) > after_seq_id
+            ),
+            order_by(&Message::seq_id).asc(),
+            limit(static_cast<int>(max_count))
+        );
+    }
+
+    /// 取会话最新消息（不含 seq_id 过滤），ORDER BY seq_id DESC, LIMIT max_count
+    std::vector<Message> load_latest(const std::string& user_a,
+                                     const std::string& user_b,
+                                     size_t max_count = 50) {
+        using namespace sqlite_orm;
+        std::lock_guard<std::mutex> lock(mtx_);
+        return storage_->get_all<Message>(
+            where(
+                (c(&Message::from_user) == user_a && c(&Message::to_user) == user_b) ||
+                (c(&Message::from_user) == user_b && c(&Message::to_user) == user_a)
+            ),
+            order_by(&Message::seq_id).desc(),
+            limit(static_cast<int>(max_count))
+        );
+    }
 };

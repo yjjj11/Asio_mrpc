@@ -164,6 +164,80 @@ public:
         return result;
     }
 
+    /// ZRANGEBYSCORE key (after_seq +inf WITHSCORES LIMIT 0 limit
+    /// 返回 seq > after_seq 的消息，ASC 升序
+    std::vector<std::tuple<uint64_t, std::string, std::string, std::string>> pull_after(
+        const std::string& user_a, const std::string& user_b,
+        uint64_t after_seq, size_t limit = 50)
+    {
+        std::lock_guard<std::mutex> lock(mtx_);
+        std::vector<std::tuple<uint64_t, std::string, std::string, std::string>> result;
+        std::string key = conv_key(user_a, user_b);
+        std::string after_str = "(" + std::to_string(after_seq);
+        std::string limit_str = std::to_string(limit);
+
+        const char* av[] = {"ZRANGEBYSCORE", key.c_str(), after_str.c_str(), "+inf", "WITHSCORES", "LIMIT", "0", limit_str.c_str()};
+        size_t al[] = {13, key.size(), after_str.size(), 4, 10, 5, 1, limit_str.size()};
+        auto* r = (redisReply*)redisCommandArgv(ctx_, 8, av, al);
+        if (!r || r->type != REDIS_REPLY_ARRAY) {
+            if (r) freeReplyObject(r);
+            return result;
+        }
+        for (size_t i = 0; i + 1 < r->elements; i += 2) {
+            if (r->element[i]->type != REDIS_REPLY_STRING) continue;
+            if (r->element[i + 1]->type != REDIS_REPLY_STRING) continue;
+            std::string encoded(r->element[i]->str);
+            auto fpos = encoded.find('|');
+            if (fpos == std::string::npos) continue;
+            auto tpos = encoded.find('|', fpos + 1);
+            if (tpos == std::string::npos) continue;
+            std::string from = encoded.substr(0, fpos);
+            std::string to   = encoded.substr(fpos + 1, tpos - fpos - 1);
+            std::string msg  = encoded.substr(tpos + 1);
+            uint64_t sid = strtoull(r->element[i + 1]->str, nullptr, 10);
+            result.emplace_back(sid, std::move(from), std::move(to), std::move(msg));
+        }
+        freeReplyObject(r);
+        return result;
+    }
+
+    /// ZREVRANGEBYSCORE key (before_seq -inf WITHSCORES LIMIT 0 limit
+    /// 返回 seq <= before_seq 的消息，DESC 降序（最新在前）
+    std::vector<std::tuple<uint64_t, std::string, std::string, std::string>> pull_before(
+        const std::string& user_a, const std::string& user_b,
+        uint64_t before_seq, size_t limit = 10)
+    {
+        std::lock_guard<std::mutex> lock(mtx_);
+        std::vector<std::tuple<uint64_t, std::string, std::string, std::string>> result;
+        std::string key = conv_key(user_a, user_b);
+        std::string before_str = std::to_string(before_seq);
+        std::string limit_str = std::to_string(limit);
+
+        const char* av[] = {"ZREVRANGEBYSCORE", key.c_str(), before_str.c_str(), "-inf", "WITHSCORES", "LIMIT", "0", limit_str.c_str()};
+        size_t al[] = {17, key.size(), before_str.size(), 4, 10, 5, 1, limit_str.size()};
+        auto* r = (redisReply*)redisCommandArgv(ctx_, 8, av, al);
+        if (!r || r->type != REDIS_REPLY_ARRAY) {
+            if (r) freeReplyObject(r);
+            return result;
+        }
+        for (size_t i = 0; i + 1 < r->elements; i += 2) {
+            if (r->element[i]->type != REDIS_REPLY_STRING) continue;
+            if (r->element[i + 1]->type != REDIS_REPLY_STRING) continue;
+            std::string encoded(r->element[i]->str);
+            auto fpos = encoded.find('|');
+            if (fpos == std::string::npos) continue;
+            auto tpos = encoded.find('|', fpos + 1);
+            if (tpos == std::string::npos) continue;
+            std::string from = encoded.substr(0, fpos);
+            std::string to   = encoded.substr(fpos + 1, tpos - fpos - 1);
+            std::string msg  = encoded.substr(tpos + 1);
+            uint64_t sid = strtoull(r->element[i + 1]->str, nullptr, 10);
+            result.emplace_back(sid, std::move(from), std::move(to), std::move(msg));
+        }
+        freeReplyObject(r);
+        return result;
+    }
+
 private:
     redisContext* ctx_ = nullptr;
     std::mutex mtx_;
