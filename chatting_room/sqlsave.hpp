@@ -6,7 +6,6 @@
 #include <cstdint>
 #include <memory>
 #include <mutex>
-#include "password_utils.hpp"
 
 /// 持久化消息结构体，对应 sqlite messages 表
 struct Message {
@@ -130,18 +129,16 @@ public:
         );
     }
 
-    /// 注册用户：插入 users 表，密码哈希后存储
+    /// 注册用户：插入 users 表
     bool register_user(const std::string& username, const std::string& password) {
         using namespace sqlite_orm;
         std::lock_guard<std::mutex> lock(mtx_);
-        // 检查是否已存在
         auto existing = storage_->get_all<User>(
             where(c(&User::username) == username)
         );
         if (!existing.empty()) return false;
 
-        User user{username, hash_password(password, username)};
-        storage_->replace(user);
+        storage_->replace(User{username, password});
         LOG_INFO("新用户注册: {}", username);
         return true;
     }
@@ -153,8 +150,7 @@ public:
         auto users = storage_->get_all<User>(
             where(c(&User::username) == username)
         );
-        if (users.empty()) return false;
-        return users[0].password_hash == hash_password(password, username);
+        return !users.empty() && users[0].password_hash == password;
     }
 
     /// 检查用户是否存在

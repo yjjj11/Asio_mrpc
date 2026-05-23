@@ -50,6 +50,6 @@ add_subdirectory(${CMAKE_HOME_DIRECTORY}/example/server_register)
 # 聊天室服务器
 add_executable(chat_server ${CMAKE_HOME_DIRECTORY}/chatting_room/server.cpp)
 target_include_directories(chat_server PRIVATE ${CMAKE_HOME_DIRECTORY}/chatting_room)
-target_link_libraries(chat_server PRIVATE hiredis sqlite3 ssl crypto)
+target_link_libraries(chat_server PRIVATE hiredis sqlite3)
 # 聊天室客户端
 add_executable(chat_client ${CMAKE_HOME_DIRECTORY}/chatting_room/client.cpp)
