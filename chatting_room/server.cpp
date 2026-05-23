@@ -365,6 +365,20 @@ std::vector<std::tuple<uint64_t, std::string, std::string, std::string>> get_con
     return redis_msgs;
 }
 
+// 批量查询各会话最新 seq_id（用于计算未读消息数）
+std::vector<std::tuple<std::string, uint64_t>> get_unread_info(
+    connection::cptr conn,
+    const std::string& username,
+    const std::vector<std::string>& partners)
+{
+    std::vector<std::tuple<std::string, uint64_t>> result;
+    for (const auto& p : partners) {
+        uint64_t latest = g_inbox.get_conv_max_seq(username, p);
+        if (latest > 0) result.emplace_back(p, latest);
+    }
+    return result;
+}
+
 int main() {
     wlog::logger::get().init("logs/chatting_room.log");
 
@@ -395,6 +409,7 @@ int main() {
     server.reg_func("sync_messages", sync_messages);
     server.reg_func("sync_history", sync_history);
     server.reg_func("get_context_messages", get_context_messages);
+    server.reg_func("get_unread_info", get_unread_info);
 
     // 新连接回调：追踪连接 + 空闲超时断开时自动下线用户
     server.set_on_accept_callback([](std::shared_ptr<connection> conn) {

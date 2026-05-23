@@ -202,12 +202,33 @@ public:
     }
 
     /// ZREVRANGEBYSCORE key (before_seq -inf WITHSCORES LIMIT 0 limit
+    /// ZREVRANGE conv:<sorted> 0 0 WITHSCORES → 返回最新 seq_id 或 0
+    uint64_t get_conv_max_seq(const std::string& user_a, const std::string& user_b) {
+        std::lock_guard<std::mutex> lock(mtx_);
+        std::string key = conv_key(user_a, user_b);
+        const char* av[] = {"ZREVRANGE", key.c_str(), "0", "0", "WITHSCORES"};
+        size_t al[] = {9, key.size(), 1, 1, 10};
+        auto* r = (redisReply*)redisCommandArgv(ctx_, 5, av, al);
+        if (!r || r->type != REDIS_REPLY_ARRAY || r->elements < 2) {
+            if (r) freeReplyObject(r);
+            return 0;
+        }
+        if (r->element[1]->type != REDIS_REPLY_STRING) {
+            freeReplyObject(r);
+            return 0;
+        }
+        uint64_t seq = strtoull(r->element[1]->str, nullptr, 10);
+        freeReplyObject(r);
+        return seq;
+    }
+
     /// SETEX token:<token> ttl <username>
     bool save_token(const std::string& token, const std::string& username, int ttl = 1800) {
         std::lock_guard<std::mutex> lock(mtx_);
         std::string key = "token:" + token;
-        const char* av[] = {"SETEX", key.c_str(), std::to_string(ttl).c_str(), username.c_str()};
-        size_t al[] = {5, key.size(), static_cast<size_t>(std::to_string(ttl).size()), username.size()};
+        std::string ttl_str = std::to_string(ttl);
+        const char* av[] = {"SETEX", key.c_str(), ttl_str.c_str(), username.c_str()};
+        size_t al[] = {5, key.size(), ttl_str.size(), username.size()};
         auto* r = (redisReply*)redisCommandArgv(ctx_, 4, av, al);
         if (!r) return false;
         freeReplyObject(r);

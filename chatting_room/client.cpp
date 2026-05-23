@@ -51,9 +51,9 @@ std::mutex g_conv_init_mutex;
 std::unordered_map<std::string, uint64_t> g_pull_cursor;
 std::mutex g_pull_cursor_mutex;
 
-// 有新消息的会话（在 hub 界面显示 【new】 标识）
-std::unordered_set<std::string> g_users_new_msg;
-std::mutex g_users_new_msg_mutex;
+// 各会话未读消息数（在 hub 界面显示 【N条新消息】）
+std::unordered_map<std::string, size_t> g_unread_counts;
+std::mutex g_unread_mutex;
 
 // 清屏
 void clear_screen() {
@@ -118,12 +118,16 @@ void draw_hub_ui() {
         if (other_users.empty()) {
             std::cout << " 暂无其他在线用户" << std::endl;
         } else {
-            std::lock_guard<std::mutex> lk(g_users_new_msg_mutex);
+            std::lock_guard<std::mutex> lk(g_unread_mutex);
             for (size_t i = 0; i < other_users.size(); ++i) {
                 std::cout << "  " << (i + 1) << ". " << other_users[i] << "【在线】";
-                if (g_users_new_msg.count(other_users[i])) {
-                    // 右对齐到与 q-退出登录 同一列
-                    std::cout << "\033[67G\033[31m【new】\033[0m";
+                auto it = g_unread_counts.find(other_users[i]);
+                if (it != g_unread_counts.end()) {
+                    if (it->second > 0) {
+                        std::cout << "\033[67G\033[31m【" << it->second << "条新消息】\033[0m";
+                    } else {
+                        std::cout << "\033[67G\033[31m【new】\033[0m";
+                    }
                 }
                 std::cout << std::endl;
             }
@@ -186,11 +190,11 @@ int on_message(connection::cptr conn, const std::string& from_user, const std::s
             hub_user = true;
         }
     }
-    // 在 hub 界面时标记新消息并重绘 hub（不在 g_chat_map_mutex 内做 IO）
+    // 在 hub 界面时更新未读计数并重绘
     if (hub_user) {
         {
-            std::lock_guard<std::mutex> lk(g_users_new_msg_mutex);
-            g_users_new_msg.insert(from_user);
+            std::lock_guard<std::mutex> lk(g_unread_mutex);
+            g_unread_counts[from_user]++;
         }
         draw_hub_ui();
     }
@@ -293,6 +297,46 @@ void remove_session_token() {
     std::remove("session_token.txt");
 }
 
+// ==================== 未读消息 ====================
+
+// 登录后调用：从服务端拉取各会话最新 seq_id，与本地游标对比得出未读数
+void fetch_unread_counts(std::shared_ptr<connection> conn, const std::string& username) {
+    // 收集所有已知 partner（游标中的 + 在线其他用户）
+    std::vector<std::string> partners;
+    {
+        std::lock_guard<std::mutex> lk(g_pull_cursor_mutex);
+        for (const auto& [p, _] : g_pull_cursor)
+            partners.push_back(p);
+    }
+    {
+        std::lock_guard<std::mutex> lk(g_online_cache_mutex);
+        for (const auto& u : g_online_users_cache) {
+            if (u != username && std::find(partners.begin(), partners.end(), u) == partners.end())
+                partners.push_back(u);
+        }
+    }
+    if (partners.empty()) return;
+
+    auto ret = conn->call<std::vector<std::tuple<std::string, uint64_t>>>("get_unread_info", username, partners);
+    if (ret.error_code() != 200 || ret.value().empty()) return;
+
+    std::lock_guard<std::mutex> lk(g_unread_mutex);
+    for (const auto& [partner, latest_seq] : ret.value()) {
+        uint64_t cursor = 0;
+        {
+            std::lock_guard<std::mutex> lk(g_pull_cursor_mutex);
+            auto it2 = g_pull_cursor.find(partner);
+            if (it2 != g_pull_cursor.end()) cursor = it2->second;
+        }
+        if (cursor > 0 && latest_seq > cursor) {
+            g_unread_counts[partner] = static_cast<size_t>(latest_seq - cursor);
+        } else if (cursor == 0) {
+            // 从未进入过的会话，标记为 new（无数字）
+            g_unread_counts[partner] = 0;
+        }
+    }
+}
+
 // 聊天界面 (推送模式)
 void chat_room(std::shared_ptr<connection> conn, const std::string& my_name, const std::string& target_name) {
     if (g_server_offline) {
@@ -301,10 +345,10 @@ void chat_room(std::shared_ptr<connection> conn, const std::string& my_name, con
         return;
     }
 
-    // 进入聊天，清除该会话的新消息标识
+    // 进入聊天，清除该会话的未读计数
     {
-        std::lock_guard<std::mutex> lk(g_users_new_msg_mutex);
-        g_users_new_msg.erase(target_name);
+        std::lock_guard<std::mutex> lk(g_unread_mutex);
+        g_unread_counts.erase(target_name);
     }
 
     // 每次进入：增量拉取新消息（使用 g_pull_cursor，与推送跟踪 g_conv_max_seq 分离）
@@ -590,8 +634,8 @@ void online_user_hub(std::shared_ptr<connection> conn, const std::string& userna
                 g_online_users_cache.clear();
             }
             {
-                std::lock_guard<std::mutex> lk(g_users_new_msg_mutex);
-                g_users_new_msg.clear();
+                std::lock_guard<std::mutex> lk(g_unread_mutex);
+                g_unread_counts.clear();
             }
             break;
         } else if (input == "g" || input == "G") {
@@ -719,6 +763,9 @@ int main() {
                             g_online_users_cache = init_ret.value();
                         }
 
+                        // 拉取未读消息计数
+                        fetch_unread_counts(conn, current_username);
+
                         // 直接进入 hub
                         online_user_hub(conn, current_username);
                         // 从 hub 退出
@@ -772,6 +819,9 @@ int main() {
                         std::lock_guard<std::mutex> lock(g_online_cache_mutex);
                         g_online_users_cache = init_ret.value();
                     }
+
+                    // 拉取未读消息计数
+                    fetch_unread_counts(conn, current_username);
 
                     // 进入在线用户列表主界面
                     online_user_hub(conn, current_username);
