@@ -289,8 +289,10 @@ void chat_room(std::shared_ptr<connection> conn, const std::string& my_name, con
                 if (hret.error_code() == 200 && !hret.value().empty()) {
                     std::lock_guard<std::mutex> lock(g_chat_map_mutex);
                     uint64_t new_min = UINT64_MAX;
-                    for (auto& [seq_id, from, to, msg] : hret.value()) {
-                        // 结果已按 seq_id ASC 排列，顺序 prepend 到前端
+                    // 结果 ASC（1,2,3），倒序迭代（3,2,1）逐个 prepend，
+                    // 这样最早的消息最终位于 front
+                    for (auto it = hret.value().rbegin(); it != hret.value().rend(); ++it) {
+                        auto& [seq_id, from, to, msg] = *it;
                         auto pos = g_chat_history_map[target_name].begin();
                         if (from == my_name) {
                             g_chat_history_map[target_name].emplace(pos, "__me__", msg);
