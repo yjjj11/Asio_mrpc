@@ -13,13 +13,15 @@
 #include <fstream>
 #include <sstream>
 #include <cstdint>
+#include <ctime>
+#include <iomanip>
 #include <set>
 
 using namespace mrpc;
 
 // 持久化会话消息存储: target_user -> vector<(sender, message, seq_id)>
-// sender = "__me__"（自己）或对方用户名, seq_id=0 表示未知（仅用于渲染时去重）
-std::unordered_map<std::string, std::vector<std::tuple<std::string, std::string, uint64_t>>> g_chat_history_map;
+// sender = "__me__"（自己）或对方用户名, seq_id=0 表示未知, ts 为 Unix 时间戳字符串
+std::unordered_map<std::string, std::vector<std::tuple<std::string, std::string, uint64_t, std::string>>> g_chat_history_map;
 std::mutex g_chat_map_mutex;
 std::string g_current_chat_target;
 bool g_in_chat = false;
@@ -86,6 +88,17 @@ void press_any_key() {
     std::cin.get();
 }
 
+// 辅助函数：将 Unix 时间戳字符串格式化为 "HH:MM" 或 "MM-DD HH:MM"
+static std::string fmt_ts(const std::string& ts_str) {
+    if (ts_str.empty()) return "";
+    std::time_t t = static_cast<std::time_t>(std::stoull(ts_str));
+    std::tm* lt = std::localtime(&t);
+    if (!lt) return "";
+    std::ostringstream oss;
+    oss << std::put_time(lt, "%m-%d %H:%M");
+    return oss.str();
+}
+
 // 重新渲染私聊界面（seq_id 去重，保证推送消息与拉取消息不会重复显示）
 void redraw_chat_ui(const std::string& target_name) {
     std::cout << "\033[H\033[2J" << std::flush;
@@ -102,11 +115,16 @@ void redraw_chat_ui(const std::string& target_name) {
             uint64_t sid = std::get<2>(msg);
             if (sid > 0 && !seen.insert(sid).second) continue;
             const auto& sender = std::get<0>(msg);
-            const auto& text = std::get<1>(msg);
+            const auto& text  = std::get<1>(msg);
+            const auto& ts    = std::get<3>(msg);
+            std::string ts_display = fmt_ts(ts);
+            if (!ts_display.empty()) ts_display += "  ";
             if (sender == "__me__") {
-                std::cout << "\033[32m我\033[0m: " << text << std::endl;
+                std::cout << ts_display << "\033[32m我\033[0m: " << text << std::endl;
+            } else if (sender == "__system__") {
+                std::cout << ts_display << "\033[33m" << text << "\033[0m" << std::endl;
             } else {
-                std::cout << "\033[34m" << sender << "\033[0m: " << text << std::endl;
+                std::cout << ts_display << "\033[34m" << sender << "\033[0m: " << text << std::endl;
             }
         }
     }
@@ -220,14 +238,15 @@ void redraw_group_chat_ui() {
     std::cout << " > " << std::flush;
 }
 
-// 接收私聊消息的RPC回调（含 seq_id，用于更新进度 + 渲染时去重）
-int on_message(connection::cptr conn, const std::string& from_user, const std::string& message, uint64_t seq_id) {
+// 接收私聊消息的RPC回调（含 seq_id + timestamp，用于更新进度 + 渲染时去重）
+int on_message(connection::cptr conn, const std::string& from_user, const std::string& message, uint64_t seq_id, const std::string& timestamp) {
     bool hub_user = false;
+    bool third_party = false;
     {
         std::lock_guard<std::mutex> lock(g_chat_map_mutex);
         LOG_INFO("on_message: from={}, msg={}, seq={}, map_size={}", from_user, message, seq_id,
                  g_chat_history_map[from_user].size());
-        g_chat_history_map[from_user].emplace_back(from_user, message, seq_id);
+        g_chat_history_map[from_user].emplace_back(from_user, message, seq_id, timestamp);
         if (seq_id > g_last_seq_id) g_last_seq_id = seq_id;
         {
             std::lock_guard<std::mutex> lk(g_conv_min_seq_mutex);
@@ -246,6 +265,8 @@ int on_message(connection::cptr conn, const std::string& from_user, const std::s
         // 记录推送的 seq_id，供渲染时去重（redraw_chat_ui 按 seq_id 去重）
         if (g_in_chat && from_user == g_current_chat_target) {
             redraw_chat_ui(g_current_chat_target);
+        } else if (g_in_chat && from_user != g_current_chat_target) {
+            third_party = true;
         }
         if (g_in_hub) {
             hub_user = true;
@@ -258,6 +279,15 @@ int on_message(connection::cptr conn, const std::string& from_user, const std::s
             g_unread_counts[from_user]++;
         }
         draw_hub_ui();
+    }
+    // 正与 B 聊天时，C 发来消息 → 通知但不重绘
+    if (third_party) {
+        {
+            std::lock_guard<std::mutex> lk(g_unread_mutex);
+            g_unread_counts[from_user]++;
+        }
+        std::cout << "\n\033[33m[来自 " << from_user << " 的新消息]\033[0m" << std::endl;
+        std::cout << " > " << std::flush;
     }
     return 0;
 }
@@ -394,12 +424,19 @@ void remove_session_token() {
 
 // 登录后调用：从服务端拉取各会话最新 seq_id，与本地游标对比得出未读数
 void fetch_unread_counts(std::shared_ptr<connection> conn, const std::string& username) {
-    // 收集所有已知 partner（游标中的 + 在线其他用户）
+    // 收集所有已知 partner（游标 + 好友 + 在线用户）
     std::vector<std::string> partners;
     {
         std::lock_guard<std::mutex> lk(g_pull_cursor_mutex);
         for (const auto& [p, _] : g_pull_cursor)
             partners.push_back(p);
+    }
+    {
+        std::lock_guard<std::mutex> lk(g_friends_mutex);
+        for (const auto& f : g_friends_list) {
+            if (std::find(partners.begin(), partners.end(), f) == partners.end())
+                partners.push_back(f);
+        }
     }
     {
         std::lock_guard<std::mutex> lk(g_online_cache_mutex);
@@ -622,16 +659,16 @@ void chat_room(std::shared_ptr<connection> conn, const std::string& my_name, con
 
     // 1. 首次进入该会话时，从 Redis 反向拉取 seq <= after_seq 的上下文（展示窗口用）
     if (needs_context && after_seq > 0) {
-        auto ctx = conn->call<std::vector<std::tuple<uint64_t, std::string, std::string, std::string>>>(
+        auto ctx = conn->call<std::vector<std::tuple<uint64_t, std::string, std::string, std::string, std::string>>>(
             "get_context_messages", my_name, target_name, after_seq, (size_t)10);
         if (ctx.error_code() == 200 && !ctx.value().empty()) {
             std::lock_guard<std::mutex> lock(g_chat_map_mutex);
             uint64_t min_seq = UINT64_MAX;
-            for (auto& [seq_id, from, to, msg] : ctx.value()) {
+            for (auto& [seq_id, from, to, msg, ts] : ctx.value()) {
                 if (from == my_name)
-                    g_chat_history_map[target_name].emplace_back("__me__", msg, seq_id);
+                    g_chat_history_map[target_name].emplace_back("__me__", msg, seq_id, ts);
                 else
-                    g_chat_history_map[target_name].emplace_back(from, msg, seq_id);
+                    g_chat_history_map[target_name].emplace_back(from, msg, seq_id, ts);
                 if (seq_id < min_seq) min_seq = seq_id;
             }
             if (min_seq != UINT64_MAX) {
@@ -645,16 +682,16 @@ void chat_room(std::shared_ptr<connection> conn, const std::string& my_name, con
 
     // 2. 增量拉取（seq > after_seq 的新消息）
     {
-        auto ret = conn->call<std::vector<std::tuple<uint64_t, std::string, std::string, std::string>>>(
+        auto ret = conn->call<std::vector<std::tuple<uint64_t, std::string, std::string, std::string, std::string>>>(
             "sync_messages", my_name, target_name, after_seq, (size_t)50);
         if (ret.error_code() == 200 && !ret.value().empty()) {
             LOG_INFO("sync_messages returned {} msgs for {}", ret.value().size(), target_name);
             std::lock_guard<std::mutex> lock(g_chat_map_mutex);
-            for (auto& [seq_id, from, to, msg] : ret.value()) {
+            for (auto& [seq_id, from, to, msg, ts] : ret.value()) {
                 if (from == my_name)
-                    g_chat_history_map[target_name].emplace_back("__me__", msg, seq_id);
+                    g_chat_history_map[target_name].emplace_back("__me__", msg, seq_id, ts);
                 else
-                    g_chat_history_map[target_name].emplace_back(from, msg, seq_id);
+                    g_chat_history_map[target_name].emplace_back(from, msg, seq_id, ts);
                 if (seq_id > g_conv_max_seq[target_name])
                     g_conv_max_seq[target_name] = seq_id;
                 if (seq_id > g_last_seq_id) g_last_seq_id = seq_id;
@@ -741,7 +778,7 @@ void chat_room(std::shared_ptr<connection> conn, const std::string& my_name, con
                     }
                     before_seq = it->second;
                 }
-                auto hret = conn->call<std::vector<std::tuple<uint64_t, std::string, std::string, std::string>>>(
+                auto hret = conn->call<std::vector<std::tuple<uint64_t, std::string, std::string, std::string, std::string>>>(
                     "sync_history", my_name, target_name, before_seq, limit);
                 if (hret.error_code() == 200 && !hret.value().empty()) {
                     std::lock_guard<std::mutex> lock(g_chat_map_mutex);
@@ -749,12 +786,12 @@ void chat_room(std::shared_ptr<connection> conn, const std::string& my_name, con
                     // 结果 ASC（1,2,3），倒序迭代（3,2,1）逐个 prepend，
                     // 这样最早的消息最终位于 front
                     for (auto it = hret.value().rbegin(); it != hret.value().rend(); ++it) {
-                        auto& [seq_id, from, to, msg] = *it;
+                        auto& [seq_id, from, to, msg, ts] = *it;
                         auto pos = g_chat_history_map[target_name].begin();
                         if (from == my_name) {
-                            g_chat_history_map[target_name].emplace(pos, "__me__", msg, seq_id);
+                            g_chat_history_map[target_name].emplace(pos, "__me__", msg, seq_id, ts);
                         } else {
-                            g_chat_history_map[target_name].emplace(pos, from, msg, seq_id);
+                            g_chat_history_map[target_name].emplace(pos, from, msg, seq_id, ts);
                         }
                         if (seq_id < new_min) new_min = seq_id;
                     }
@@ -781,9 +818,10 @@ void chat_room(std::shared_ptr<connection> conn, const std::string& my_name, con
             }
             auto send_ret = conn->call<uint64_t>("send_message", my_name, target_name, input);
             uint64_t send_seq_id = (send_ret.error_code() == 200) ? send_ret.value() : 0;
+            auto local_ts = std::to_string(std::time(nullptr));
             {
                 std::lock_guard<std::mutex> lock(g_chat_map_mutex);
-                g_chat_history_map[target_name].emplace_back("__me__", input, send_seq_id);
+                g_chat_history_map[target_name].emplace_back("__me__", input, send_seq_id, local_ts);
                 if (send_seq_id > 0) {
                     if (send_seq_id > g_last_seq_id) g_last_seq_id = send_seq_id;
                     {
@@ -807,6 +845,8 @@ void chat_room(std::shared_ptr<connection> conn, const std::string& my_name, con
                         if (it == g_pull_cursor.end() || send_seq_id > it->second)
                             g_pull_cursor[target_name] = send_seq_id;
                     }
+                } else {
+                    g_chat_history_map[target_name].emplace_back("__system__", "【对方用户不存在，消息发送失败】", 0, local_ts);
                 }
             }
         }
@@ -885,6 +925,8 @@ void online_user_hub(std::shared_ptr<connection> conn, const std::string& userna
             g_pending_requests = ret.value();
         }
     }
+    // 此时好友列表已就绪，拉取未读消息计数（含离线好友的消息）
+    fetch_unread_counts(conn, username);
 
     while (true) {
         draw_hub_ui();
@@ -1066,9 +1108,6 @@ int main() {
                             g_online_users_cache = init_ret.value();
                         }
 
-                        // 拉取未读消息计数
-                        fetch_unread_counts(conn, current_username);
-
                         // 直接进入 hub
                         online_user_hub(conn, current_username);
                         // 从 hub 退出
@@ -1122,9 +1161,6 @@ int main() {
                         std::lock_guard<std::mutex> lock(g_online_cache_mutex);
                         g_online_users_cache = init_ret.value();
                     }
-
-                    // 拉取未读消息计数
-                    fetch_unread_counts(conn, current_username);
 
                     // 进入在线用户列表主界面
                     online_user_hub(conn, current_username);

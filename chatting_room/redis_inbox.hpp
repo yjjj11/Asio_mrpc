@@ -51,13 +51,14 @@ public:
         return seq;
     }
 
-    /// ZADD conv:<sorted_pair> seq_id "from|to|msg"
+    /// ZADD conv:<sorted_pair> seq_id "from|to|msg|timestamp"
     /// 返回 true 表示写入成功
     bool push_conv(const std::string& user_a, const std::string& user_b,
                    uint64_t seq_id, const std::string& from,
-                   const std::string& to, const std::string& msg) {
+                   const std::string& to, const std::string& msg,
+                   const std::string& timestamp) {
         std::lock_guard<std::mutex> lock(mtx_);
-        auto encoded = from + "|" + to + "|" + msg;
+        auto encoded = from + "|" + to + "|" + msg + "|" + timestamp;
         auto seq_str = std::to_string(seq_id);
         std::string key = conv_key(user_a, user_b);
         const char* av[] = {"ZADD", key.c_str(), seq_str.c_str(), encoded.c_str()};
@@ -69,12 +70,12 @@ public:
     }
 
     /// 如果 conv ZSET 超过 keep 条，弹出最旧的并返回
-    /// 返回 vector<(seq_id, from, to, msg)>
-    std::vector<std::tuple<uint64_t, std::string, std::string, std::string>> trim_conv(
+    /// 返回 vector<(seq_id, from, to, msg, ts)>
+    std::vector<std::tuple<uint64_t, std::string, std::string, std::string, std::string>> trim_conv(
         const std::string& user_a, const std::string& user_b, size_t keep = 10)
     {
         std::lock_guard<std::mutex> lock(mtx_);
-        std::vector<std::tuple<uint64_t, std::string, std::string, std::string>> result;
+        std::vector<std::tuple<uint64_t, std::string, std::string, std::string, std::string>> result;
         std::string key = conv_key(user_a, user_b);
 
         // ZCARD 检查大小
@@ -110,11 +111,14 @@ public:
             if (fpos == std::string::npos) continue;
             auto tpos = encoded.find('|', fpos + 1);
             if (tpos == std::string::npos) continue;
+            auto ts_pos = encoded.find('|', tpos + 1);
+            if (ts_pos == std::string::npos) continue;
             std::string from = encoded.substr(0, fpos);
             std::string to   = encoded.substr(fpos + 1, tpos - fpos - 1);
-            std::string msg  = encoded.substr(tpos + 1);
+            std::string msg  = encoded.substr(tpos + 1, ts_pos - tpos - 1);
+            std::string ts   = encoded.substr(ts_pos + 1);
             uint64_t sid = strtoull(range_r->element[i + 1]->str, nullptr, 10);
-            result.emplace_back(sid, std::move(from), std::move(to), std::move(msg));
+            result.emplace_back(sid, std::move(from), std::move(to), std::move(msg), std::move(ts));
         }
         freeReplyObject(range_r);
 
@@ -129,11 +133,11 @@ public:
     }
 
     /// ZRANGE conv ZSET 取最近 limit 条（升序，seq_id 从小到大）
-    std::vector<std::tuple<uint64_t, std::string, std::string, std::string>> pull_recent(
+    std::vector<std::tuple<uint64_t, std::string, std::string, std::string, std::string>> pull_recent(
         const std::string& user_a, const std::string& user_b, size_t limit = 10)
     {
         std::lock_guard<std::mutex> lock(mtx_);
-        std::vector<std::tuple<uint64_t, std::string, std::string, std::string>> result;
+        std::vector<std::tuple<uint64_t, std::string, std::string, std::string, std::string>> result;
         std::string key = conv_key(user_a, user_b);
         std::string start = "-" + std::to_string(limit);
         const char* end = "-1";
@@ -154,11 +158,14 @@ public:
             if (fpos == std::string::npos) continue;
             auto tpos = encoded.find('|', fpos + 1);
             if (tpos == std::string::npos) continue;
+            auto ts_pos = encoded.find('|', tpos + 1);
+            if (ts_pos == std::string::npos) continue;
             std::string from = encoded.substr(0, fpos);
             std::string to   = encoded.substr(fpos + 1, tpos - fpos - 1);
-            std::string msg  = encoded.substr(tpos + 1);
+            std::string msg  = encoded.substr(tpos + 1, ts_pos - tpos - 1);
+            std::string ts   = encoded.substr(ts_pos + 1);
             uint64_t sid = strtoull(r->element[i + 1]->str, nullptr, 10);
-            result.emplace_back(sid, std::move(from), std::move(to), std::move(msg));
+            result.emplace_back(sid, std::move(from), std::move(to), std::move(msg), std::move(ts));
         }
         freeReplyObject(r);
         return result;
@@ -166,12 +173,12 @@ public:
 
     /// ZRANGEBYSCORE key (after_seq +inf WITHSCORES LIMIT 0 limit
     /// 返回 seq > after_seq 的消息，ASC 升序
-    std::vector<std::tuple<uint64_t, std::string, std::string, std::string>> pull_after(
+    std::vector<std::tuple<uint64_t, std::string, std::string, std::string, std::string>> pull_after(
         const std::string& user_a, const std::string& user_b,
         uint64_t after_seq, size_t limit = 50)
     {
         std::lock_guard<std::mutex> lock(mtx_);
-        std::vector<std::tuple<uint64_t, std::string, std::string, std::string>> result;
+        std::vector<std::tuple<uint64_t, std::string, std::string, std::string, std::string>> result;
         std::string key = conv_key(user_a, user_b);
         std::string after_str = "(" + std::to_string(after_seq);
         std::string limit_str = std::to_string(limit);
@@ -191,11 +198,14 @@ public:
             if (fpos == std::string::npos) continue;
             auto tpos = encoded.find('|', fpos + 1);
             if (tpos == std::string::npos) continue;
+            auto ts_pos = encoded.find('|', tpos + 1);
+            if (ts_pos == std::string::npos) continue;
             std::string from = encoded.substr(0, fpos);
             std::string to   = encoded.substr(fpos + 1, tpos - fpos - 1);
-            std::string msg  = encoded.substr(tpos + 1);
+            std::string msg  = encoded.substr(tpos + 1, ts_pos - tpos - 1);
+            std::string ts   = encoded.substr(ts_pos + 1);
             uint64_t sid = strtoull(r->element[i + 1]->str, nullptr, 10);
-            result.emplace_back(sid, std::move(from), std::move(to), std::move(msg));
+            result.emplace_back(sid, std::move(from), std::move(to), std::move(msg), std::move(ts));
         }
         freeReplyObject(r);
         return result;
@@ -264,12 +274,12 @@ public:
     }
 
     /// 返回 seq <= before_seq 的消息，DESC 降序（最新在前）
-    std::vector<std::tuple<uint64_t, std::string, std::string, std::string>> pull_before(
+    std::vector<std::tuple<uint64_t, std::string, std::string, std::string, std::string>> pull_before(
         const std::string& user_a, const std::string& user_b,
         uint64_t before_seq, size_t limit = 10)
     {
         std::lock_guard<std::mutex> lock(mtx_);
-        std::vector<std::tuple<uint64_t, std::string, std::string, std::string>> result;
+        std::vector<std::tuple<uint64_t, std::string, std::string, std::string, std::string>> result;
         std::string key = conv_key(user_a, user_b);
         std::string before_str = std::to_string(before_seq);
         std::string limit_str = std::to_string(limit);
@@ -289,11 +299,14 @@ public:
             if (fpos == std::string::npos) continue;
             auto tpos = encoded.find('|', fpos + 1);
             if (tpos == std::string::npos) continue;
+            auto ts_pos = encoded.find('|', tpos + 1);
+            if (ts_pos == std::string::npos) continue;
             std::string from = encoded.substr(0, fpos);
             std::string to   = encoded.substr(fpos + 1, tpos - fpos - 1);
-            std::string msg  = encoded.substr(tpos + 1);
+            std::string msg  = encoded.substr(tpos + 1, ts_pos - tpos - 1);
+            std::string ts   = encoded.substr(ts_pos + 1);
             uint64_t sid = strtoull(r->element[i + 1]->str, nullptr, 10);
-            result.emplace_back(sid, std::move(from), std::move(to), std::move(msg));
+            result.emplace_back(sid, std::move(from), std::move(to), std::move(msg), std::move(ts));
         }
         freeReplyObject(r);
         return result;

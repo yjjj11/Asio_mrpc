@@ -8,6 +8,7 @@
 #include <random>
 #include <sstream>
 #include <iomanip>
+#include <ctime>
 #include <asio/signal_set.hpp>
 #include "redis_inbox.hpp"
 #include "sqlsave.hpp"
@@ -162,14 +163,22 @@ bool user_logout(connection::cptr conn, const std::string& username, const std::
 
 // 发送私聊消息：写 conv ZSET，超 10 条则持久化到 SQLite，返回 seq_id
 uint64_t send_message(connection::cptr conn, const std::string& from_user, const std::string& to_user, const std::string& message) {
+    // 检查目标用户是否存在
+    if (!g_sqlite.user_exists(to_user)) {
+        LOG_WARN("发送消息给不存在的用户: {} -> {}", from_user, to_user);
+        return 0;
+    }
+
     uint64_t seq_id = g_inbox.next_seq_id();
     if (seq_id == 0) {
         LOG_ERROR("Redis next_seq_id 失败，消息丢失: {} -> {}", from_user, to_user);
         return 0;
     }
 
+    std::string timestamp = std::to_string(std::time(nullptr));
+
     // 写入会话 ZSET（conv:<from>:<to>，字典序）
-    if (!g_inbox.push_conv(from_user, to_user, seq_id, from_user, to_user, message)) {
+    if (!g_inbox.push_conv(from_user, to_user, seq_id, from_user, to_user, message, timestamp)) {
         LOG_ERROR("Redis ZADD 失败，消息丢失: {} -> {}", from_user, to_user);
         return 0;
     }
@@ -180,8 +189,8 @@ uint64_t send_message(connection::cptr conn, const std::string& from_user, const
         // 异步持久化到 SQLite，不阻塞消息发送
         auto msgs = std::make_shared<std::vector<Message>>();
         msgs->reserve(evicted.size());
-        for (auto& [sid, f, t, m] : evicted) {
-            msgs->push_back({sid, std::move(f), std::move(t), std::move(m), ""});
+        for (auto& [sid, f, t, m, ts] : evicted) {
+            msgs->push_back({sid, std::move(f), std::move(t), std::move(m), std::move(ts)});
         }
         g_task_pool.post([msgs] { g_sqlite.save(*msgs); });
     }
@@ -192,7 +201,7 @@ uint64_t send_message(connection::cptr conn, const std::string& from_user, const
     if (it != g_online_users.end()) {
         LOG_INFO("推送私聊: {} -> {}: {}", from_user, to_user, message);
         it->second->async_call([](uint32_t, const std::string&, const nlohmann::json&){},
-            "on_message", from_user, message, seq_id);
+            "on_message", from_user, message, seq_id, timestamp);
     } else {
         LOG_INFO("用户 {} 不在线，消息已 Redis 缓存: {} -> {}", to_user, from_user, to_user);
     }
@@ -274,11 +283,11 @@ std::tuple<std::string, uint16_t> request_p2p_connect(
 }
 
 // 增量拉取消息：after_seq=0 返回最新 limit 条（冷启动），否则返回 seq > after_seq 的消息
-std::vector<std::tuple<uint64_t, std::string, std::string, std::string>> sync_messages(
+std::vector<std::tuple<uint64_t, std::string, std::string, std::string, std::string>> sync_messages(
     connection::cptr conn, const std::string& username,
     const std::string& partner, uint64_t after_seq, size_t limit)
 {
-    using MsgTuple = std::tuple<uint64_t, std::string, std::string, std::string>;
+    using MsgTuple = std::tuple<uint64_t, std::string, std::string, std::string, std::string>;
 
     if (after_seq == 0) {
         // 冷启动：返回最新 limit 条
@@ -294,7 +303,7 @@ std::vector<std::tuple<uint64_t, std::string, std::string, std::string>> sync_me
             std::vector<MsgTuple> result;
             result.reserve(limit);
             for (auto& m : sql_msgs)
-                result.emplace_back(m.seq_id, m.from_user, m.to_user, m.msg);
+                result.emplace_back(m.seq_id, m.from_user, m.to_user, m.msg, m.created_at);
             for (auto& t : redis_msgs)
                 result.push_back(std::move(t));
             return result;
@@ -305,7 +314,7 @@ std::vector<std::tuple<uint64_t, std::string, std::string, std::string>> sync_me
             std::vector<MsgTuple> result;
             result.reserve(sql_msgs.size());
             for (auto& m : sql_msgs)
-                result.emplace_back(m.seq_id, m.from_user, m.to_user, m.msg);
+                result.emplace_back(m.seq_id, m.from_user, m.to_user, m.msg, m.created_at);
             return result;
         }
     }
@@ -322,17 +331,17 @@ std::vector<std::tuple<uint64_t, std::string, std::string, std::string>> sync_me
     while (result.size() < limit && (sql_it != sql_msgs.end() || redis_it != redis_msgs.end())) {
         if (sql_it == sql_msgs.end()) {
             result.emplace_back(std::get<0>(*redis_it), std::get<1>(*redis_it),
-                                std::get<2>(*redis_it), std::get<3>(*redis_it));
+                                std::get<2>(*redis_it), std::get<3>(*redis_it), std::get<4>(*redis_it));
             ++redis_it;
         } else if (redis_it == redis_msgs.end()) {
-            result.emplace_back(sql_it->seq_id, sql_it->from_user, sql_it->to_user, sql_it->msg);
+            result.emplace_back(sql_it->seq_id, sql_it->from_user, sql_it->to_user, sql_it->msg, sql_it->created_at);
             ++sql_it;
         } else if (sql_it->seq_id < std::get<0>(*redis_it)) {
-            result.emplace_back(sql_it->seq_id, sql_it->from_user, sql_it->to_user, sql_it->msg);
+            result.emplace_back(sql_it->seq_id, sql_it->from_user, sql_it->to_user, sql_it->msg, sql_it->created_at);
             ++sql_it;
         } else {
             result.emplace_back(std::get<0>(*redis_it), std::get<1>(*redis_it),
-                                std::get<2>(*redis_it), std::get<3>(*redis_it));
+                                std::get<2>(*redis_it), std::get<3>(*redis_it), std::get<4>(*redis_it));
             ++redis_it;
         }
     }
@@ -340,22 +349,22 @@ std::vector<std::tuple<uint64_t, std::string, std::string, std::string>> sync_me
 }
 
 // 从 SQLite 拉取更早的历史消息（翻页，聊天界面输入 -g 时调用）
-std::vector<std::tuple<uint64_t, std::string, std::string, std::string>> sync_history(
+std::vector<std::tuple<uint64_t, std::string, std::string, std::string, std::string>> sync_history(
     connection::cptr conn, const std::string& username,
     const std::string& partner, uint64_t before_seq_id, size_t limit)
 {
     auto msgs = g_sqlite.load(username, partner, before_seq_id, limit);
-    std::vector<std::tuple<uint64_t, std::string, std::string, std::string>> result;
+    std::vector<std::tuple<uint64_t, std::string, std::string, std::string, std::string>> result;
     result.reserve(msgs.size());
     // load() 返回 DESC（最新在前），反转成 ASC 以便客户端顺序 prepend
     for (auto it = msgs.rbegin(); it != msgs.rend(); ++it) {
-        result.emplace_back(it->seq_id, it->from_user, it->to_user, it->msg);
+        result.emplace_back(it->seq_id, it->from_user, it->to_user, it->msg, it->created_at);
     }
     return result;
 }
 
 // 从 Redis 反向拉取会话上下文（seq <= before_seq，用于重启后填充展示窗口）
-std::vector<std::tuple<uint64_t, std::string, std::string, std::string>> get_context_messages(
+std::vector<std::tuple<uint64_t, std::string, std::string, std::string, std::string>> get_context_messages(
     connection::cptr conn, const std::string& username,
     const std::string& partner, uint64_t before_seq, size_t limit)
 {
