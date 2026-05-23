@@ -49,10 +49,6 @@ std::mutex g_conv_min_seq_mutex;
 std::unordered_map<std::string, uint64_t> g_conv_max_seq;
 std::mutex g_conv_max_seq_mutex;
 
-// 会话是否已完成上下文加载（首次进入时从 Redis 反向拉取或冷启动）
-std::unordered_set<std::string> g_conv_initialized;
-std::mutex g_conv_init_mutex;
-
 // 增量拉取游标（用于 sync_messages 的 after_seq，与推送跟踪 g_conv_max_seq 分离）
 std::unordered_map<std::string, uint64_t> g_pull_cursor;
 std::mutex g_pull_cursor_mutex;
@@ -424,7 +420,7 @@ void remove_session_token() {
 
 // 登录后调用：从服务端拉取各会话最新 seq_id，与本地游标对比得出未读数
 void fetch_unread_counts(std::shared_ptr<connection> conn, const std::string& username) {
-    // 收集所有已知 partner（游标 + 好友 + 在线用户）
+    // 收集所有已知 partner（游标 + 好友 + 在线用户 + chat_history_map 中有过消息的）
     std::vector<std::string> partners;
     {
         std::lock_guard<std::mutex> lk(g_pull_cursor_mutex);
@@ -445,13 +441,22 @@ void fetch_unread_counts(std::shared_ptr<connection> conn, const std::string& us
                 partners.push_back(u);
         }
     }
+    // Bug 4 fix: 也包括 chat_history_map 中已有的 partner（通过 push 通知接收过消息的陌生人）
+    {
+        std::lock_guard<std::mutex> lk(g_chat_map_mutex);
+        for (const auto& [p, _] : g_chat_history_map) {
+            if (p != username && std::find(partners.begin(), partners.end(), p) == partners.end())
+                partners.push_back(p);
+        }
+    }
     if (partners.empty()) return;
 
-    auto ret = conn->call<std::vector<std::tuple<std::string, uint64_t>>>("get_unread_info", username, partners);
+    // handle_get_unread_info 现在返回 (partner, latest_seq, latest_from)
+    auto ret = conn->call<std::vector<std::tuple<std::string, uint64_t, std::string>>>("get_unread_info", username, partners);
     if (ret.error_code() != 200 || ret.value().empty()) return;
 
     std::lock_guard<std::mutex> lk(g_unread_mutex);
-    for (const auto& [partner, latest_seq] : ret.value()) {
+    for (const auto& [partner, latest_seq, latest_from] : ret.value()) {
         uint64_t cursor = 0;
         {
             std::lock_guard<std::mutex> lk(g_pull_cursor_mutex);
@@ -460,10 +465,11 @@ void fetch_unread_counts(std::shared_ptr<connection> conn, const std::string& us
         }
         if (cursor > 0 && latest_seq > cursor) {
             g_unread_counts[partner] = static_cast<size_t>(latest_seq - cursor);
-        } else if (cursor == 0) {
-            // 从未进入过的会话，标记为 new（无数字）
+        } else if (cursor == 0 && latest_from != username) {
+            // 从未进入过的会话且最新消息不是自己发的 → 标记为 new
             g_unread_counts[partner] = 0;
         }
+        // cursor == 0 && latest_from == username: 自己发的消息，不显示 new
     }
 }
 
@@ -643,47 +649,18 @@ void chat_room(std::shared_ptr<connection> conn, const std::string& my_name, con
         g_unread_counts.erase(target_name);
     }
 
-    // 每次进入：增量拉取新消息（使用 g_pull_cursor，与推送跟踪 g_conv_max_seq 分离）
+    // 从本地 cursor 读取 after_seq，加载最新 20 条或 cursor 之后的消息
     uint64_t after_seq = 0;
-    bool needs_context = false;
     {
         std::lock_guard<std::mutex> lk(g_pull_cursor_mutex);
         auto it = g_pull_cursor.find(target_name);
         if (it != g_pull_cursor.end()) after_seq = it->second;
     }
-    {
-        std::lock_guard<std::mutex> lk(g_conv_init_mutex);
-        if (g_conv_initialized.find(target_name) == g_conv_initialized.end())
-            needs_context = true;
-    }
 
-    // 1. 首次进入该会话时，从 Redis 反向拉取 seq <= after_seq 的上下文（展示窗口用）
-    if (needs_context && after_seq > 0) {
-        auto ctx = conn->call<std::vector<std::tuple<uint64_t, std::string, std::string, std::string, std::string>>>(
-            "get_context_messages", my_name, target_name, after_seq, (size_t)10);
-        if (ctx.error_code() == 200 && !ctx.value().empty()) {
-            std::lock_guard<std::mutex> lock(g_chat_map_mutex);
-            uint64_t min_seq = UINT64_MAX;
-            for (auto& [seq_id, from, to, msg, ts] : ctx.value()) {
-                if (from == my_name)
-                    g_chat_history_map[target_name].emplace_back("__me__", msg, seq_id, ts);
-                else
-                    g_chat_history_map[target_name].emplace_back(from, msg, seq_id, ts);
-                if (seq_id < min_seq) min_seq = seq_id;
-            }
-            if (min_seq != UINT64_MAX) {
-                std::lock_guard<std::mutex> lk(g_conv_min_seq_mutex);
-                auto it = g_conv_min_seq.find(target_name);
-                if (it == g_conv_min_seq.end() || min_seq < it->second)
-                    g_conv_min_seq[target_name] = min_seq;
-            }
-        }
-    }
-
-    // 2. 增量拉取（seq > after_seq 的新消息）
+    // 加载消息（SQLite 作为唯一数据源）
     {
         auto ret = conn->call<std::vector<std::tuple<uint64_t, std::string, std::string, std::string, std::string>>>(
-            "sync_messages", my_name, target_name, after_seq, (size_t)50);
+            "sync_messages", my_name, target_name, after_seq, (size_t)20);
         if (ret.error_code() == 200 && !ret.value().empty()) {
             LOG_INFO("sync_messages returned {} msgs for {}", ret.value().size(), target_name);
             std::lock_guard<std::mutex> lock(g_chat_map_mutex);
@@ -707,20 +684,13 @@ void chat_room(std::shared_ptr<connection> conn, const std::string& my_name, con
         }
     }
 
-    // 按 seq_id 排序消息，确保推送消息（可能在向量前端）与同步消息（在末尾）不混乱
-    // 保证显示顺序 = 时间顺序（旧→新）
+    // 按 seq_id 排序消息，确保显示顺序 = 时间顺序（旧→新）
     {
         std::lock_guard<std::mutex> lock(g_chat_map_mutex);
         auto& msgs = g_chat_history_map[target_name];
         std::sort(msgs.begin(), msgs.end(), [](const auto& a, const auto& b) {
             return std::get<2>(a) < std::get<2>(b);
         });
-    }
-
-    // 3. 标记会话上下文已加载（首次进入完成）
-    {
-        std::lock_guard<std::mutex> lk(g_conv_init_mutex);
-        g_conv_initialized.insert(target_name);
     }
 
     std::string input;
@@ -1046,7 +1016,10 @@ void print_menu() {
     std::cout << " 请选择操作: ";
 }
 
-int main() {
+int main(int argc, char* argv[]) {
+    uint16_t port = 8877;
+    if (argc > 1) port = static_cast<uint16_t>(std::stoi(argv[1]));
+
     wlog::logger::get().init("logs/chatting_room_client.log");
 #ifdef _LOG_CONSOLE
     spdlog::default_logger()->sinks().pop_back(); // 移除控制台输出，只写文件
@@ -1065,8 +1038,8 @@ int main() {
 
     // 连接到服务器
     clear_screen();
-    std::cout << "正在连接聊天室服务器..." << std::endl;
-    auto conn = client.connect("127.0.0.1", 8888);
+    std::cout << "正在连接聊天室服务器 (127.0.0.1:" << port << ")..." << std::endl;
+    auto conn = client.connect("127.0.0.1", port);
     if (!conn) {
         std::cerr << "连接服务器失败！请确认服务器已启动。" << std::endl;
         return 1;
