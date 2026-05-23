@@ -626,6 +626,7 @@ void print_menu() {
     std::cout << " 状态: 未登录" << std::endl;
     std::cout << "========================================" << std::endl;
     std::cout << "  1. 用户登录" << std::endl;
+    std::cout << "  2. 用户注册" << std::endl;
     std::cout << "  5. 退出程序" << std::endl;
     std::cout << "========================================" << std::endl;
     std::cout << " 请选择操作: ";
@@ -683,9 +684,12 @@ int main() {
                 std::cout << "=============== 用户登录 ===============" << std::endl;
                 std::cout << " 请输入用户名: ";
                 std::cin >> current_username;
+                std::cout << " 请输入密码: ";
+                std::string password;
+                std::cin >> password;
 
                 std::cout << " 正在登录..." << std::endl;
-                auto ret = conn->call<bool>("user_login", current_username);
+                auto ret = conn->call<bool>("user_login", current_username, password);
                 if (ret.error_code() == 200 && ret.value()) {
                     std::cout << " \033[32m登录成功！\033[0m 欢迎 " << current_username << " 加入聊天室！" << std::endl;
                     std::this_thread::sleep_for(std::chrono::milliseconds(500));
@@ -715,7 +719,27 @@ int main() {
                 }
                 break;
             }
-            case 2: { // 查看在线用户
+            case 2: { // 注册
+                clear_screen();
+                std::cout << "=============== 用户注册 ===============" << std::endl;
+                std::cout << " 请输入用户名: ";
+                std::string new_user;
+                std::cin >> new_user;
+                std::cout << " 请输入密码: ";
+                std::string reg_password;
+                std::cin >> reg_password;
+
+                std::cout << " 正在注册..." << std::endl;
+                auto reg_ret = conn->call<bool>("register_user", new_user, reg_password);
+                if (reg_ret.error_code() == 200 && reg_ret.value()) {
+                    std::cout << " \033[32m注册成功！\033[0m 请返回登录" << std::endl;
+                } else {
+                    std::cout << " \033[31m注册失败！\033[0m 用户名可能已存在" << std::endl;
+                }
+                press_any_key();
+                break;
+            }
+            case 3: { // 查看在线用户
                 clear_screen();
                 std::cout << "============= 在线用户列表 =============" << std::endl;
                 auto ret = conn->call<std::vector<std::string>>("get_online_users");
@@ -741,7 +765,7 @@ int main() {
                 press_any_key();
                 break;
             }
-            case 3: { // 选择用户私聊
+            case 4: { // 选择用户私聊
                 clear_screen();
                 if (!is_logged_in) {
                     std::cout << "============= 选择用户私聊 =============" << std::endl;
@@ -791,7 +815,7 @@ int main() {
                 }
                 break;
             }
-            case 4: { // 进入群聊
+            case 5: { // 进入群聊
                 clear_screen();
                 if (!is_logged_in) {
                     std::cout << "============= 进入群聊 =============" << std::endl;
@@ -802,7 +826,7 @@ int main() {
                 group_chat_room(conn, current_username);
                 break;
             }
-            case 5: { // 退出
+            case 6: { // 退出
                 clear_screen();
                 std::cout << "============= 退出程序 ===============" << std::endl;
                 if (is_logged_in && !current_username.empty()) {

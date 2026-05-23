@@ -48,8 +48,19 @@ struct P2PAddr {
 std::unordered_map<std::string, P2PAddr> g_user_p2p_addr;
 std::shared_mutex g_p2p_mutex;
 
-// 用户上线处理函数
-bool user_login(connection::cptr conn, const std::string& username) {
+// 用户注册（密码由 SQLite 哈希存储）
+bool register_user(connection::cptr conn, const std::string& username, const std::string& password) {
+    return g_sqlite.register_user(username, password);
+}
+
+// 用户登录处理函数（验证密码）
+bool user_login(connection::cptr conn, const std::string& username, const std::string& password) {
+    // 验证密码
+    if (!g_sqlite.verify_user(username, password)) {
+        LOG_WARN("用户 {} 登录失败：密码错误或用户不存在", username);
+        return false;
+    }
+
     std::unique_lock<std::shared_mutex> lock(g_online_mutex);
 
     // 检查用户是否已在线
@@ -320,6 +331,7 @@ int main() {
     }
 
     // 注册RPC函数
+    server.reg_func("register_user", register_user);
     server.reg_func("user_login", user_login);
     server.reg_func("user_logout", user_logout);
     server.reg_func("get_online_users", get_online_users);

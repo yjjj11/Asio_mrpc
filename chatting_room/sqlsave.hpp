@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include "password_utils.hpp"
 
 /// 持久化消息结构体，对应 sqlite messages 表
 struct Message {
@@ -14,6 +15,12 @@ struct Message {
     std::string to_user;
     std::string msg;
     std::string created_at;
+};
+
+/// 用户账户结构体，对应 sqlite users 表
+struct User {
+    std::string username;
+    std::string password_hash;
 };
 
 /// 构建 sqlite_orm storage（分离用于类型推导）
@@ -26,6 +33,10 @@ inline auto make_message_storage(const std::string& path) {
             make_column("to_user", &Message::to_user),
             make_column("msg", &Message::msg),
             make_column("created_at", &Message::created_at)
+        ),
+        make_table("users",
+            make_column("username", &User::username, primary_key()),
+            make_column("password_hash", &User::password_hash)
         )
     );
 }
@@ -117,5 +128,42 @@ public:
             order_by(&Message::seq_id).desc(),
             limit(static_cast<int>(max_count))
         );
+    }
+
+    /// 注册用户：插入 users 表，密码哈希后存储
+    bool register_user(const std::string& username, const std::string& password) {
+        using namespace sqlite_orm;
+        std::lock_guard<std::mutex> lock(mtx_);
+        // 检查是否已存在
+        auto existing = storage_->get_all<User>(
+            where(c(&User::username) == username)
+        );
+        if (!existing.empty()) return false;
+
+        User user{username, hash_password(password, username)};
+        storage_->replace(user);
+        LOG_INFO("新用户注册: {}", username);
+        return true;
+    }
+
+    /// 验证用户密码
+    bool verify_user(const std::string& username, const std::string& password) {
+        using namespace sqlite_orm;
+        std::lock_guard<std::mutex> lock(mtx_);
+        auto users = storage_->get_all<User>(
+            where(c(&User::username) == username)
+        );
+        if (users.empty()) return false;
+        return users[0].password_hash == hash_password(password, username);
+    }
+
+    /// 检查用户是否存在
+    bool user_exists(const std::string& username) {
+        using namespace sqlite_orm;
+        std::lock_guard<std::mutex> lock(mtx_);
+        auto users = storage_->get_all<User>(
+            where(c(&User::username) == username)
+        );
+        return !users.empty();
     }
 };
