@@ -142,6 +142,45 @@ chat_client/fast:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/chat_client.dir/build.make CMakeFiles/chat_client.dir/build
 .PHONY : chat_client/fast
 
+#=============================================================================
+# Target rules for targets named coro_call_client
+
+# Build rule for target.
+coro_call_client: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 coro_call_client
+.PHONY : coro_call_client
+
+# fast build rule for target.
+coro_call_client/fast:
+	$(MAKE) $(MAKESILENT) -f example/coro_call_client/CMakeFiles/coro_call_client.dir/build.make example/coro_call_client/CMakeFiles/coro_call_client.dir/build
+.PHONY : coro_call_client/fast
+
+#=============================================================================
+# Target rules for targets named test_server
+
+# Build rule for target.
+test_server: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 test_server
+.PHONY : test_server
+
+# fast build rule for target.
+test_server/fast:
+	$(MAKE) $(MAKESILENT) -f example/server_register/CMakeFiles/test_server.dir/build.make example/server_register/CMakeFiles/test_server.dir/build
+.PHONY : test_server/fast
+
+#=============================================================================
+# Target rules for targets named other_server
+
+# Build rule for target.
+other_server: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 other_server
+.PHONY : other_server
+
+# fast build rule for target.
+other_server/fast:
+	$(MAKE) $(MAKESILENT) -f example/server_register/CMakeFiles/other_server.dir/build.make example/server_register/CMakeFiles/other_server.dir/build
+.PHONY : other_server/fast
+
 chatting_room/client.o: chatting_room/client.cpp.o
 .PHONY : chatting_room/client.o
 
@@ -200,6 +239,9 @@ help:
 	@echo "... rebuild_cache"
 	@echo "... chat_client"
 	@echo "... chat_server"
+	@echo "... coro_call_client"
+	@echo "... other_server"
+	@echo "... test_server"
 	@echo "... chatting_room/client.o"
 	@echo "... chatting_room/client.i"
 	@echo "... chatting_room/client.s"

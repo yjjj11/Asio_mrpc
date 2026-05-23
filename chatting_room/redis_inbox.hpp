@@ -128,17 +128,19 @@ public:
         return result;
     }
 
-    /// ZREVRANGE conv ZSET 取最近 limit 条
+    /// ZRANGE conv ZSET 取最近 limit 条（升序，seq_id 从小到大）
     std::vector<std::tuple<uint64_t, std::string, std::string, std::string>> pull_recent(
         const std::string& user_a, const std::string& user_b, size_t limit = 10)
     {
         std::lock_guard<std::mutex> lock(mtx_);
         std::vector<std::tuple<uint64_t, std::string, std::string, std::string>> result;
         std::string key = conv_key(user_a, user_b);
-        std::string limit_str = std::to_string(limit);
+        std::string start = "-" + std::to_string(limit);
+        const char* end = "-1";
 
-        const char* av[] = {"ZREVRANGE", key.c_str(), "0", limit_str.c_str(), "WITHSCORES"};
-        size_t al[] = {9, key.size(), 1, limit_str.size(), 10};
+        // ZRANGE key -limit -1 WITHSCORES 取最高分的 limit 条，升序排列
+        const char* av[] = {"ZRANGE", key.c_str(), start.c_str(), end, "WITHSCORES"};
+        size_t al[] = {6, key.size(), start.size(), 2, 10};
         auto* r = (redisReply*)redisCommandArgv(ctx_, 5, av, al);
         if (!r || r->type != REDIS_REPLY_ARRAY) {
             if (r) freeReplyObject(r);
