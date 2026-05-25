@@ -1,0 +1,33 @@
+# Git
+.git
+.gitignore
+.gitmodules
+
+# Build artifacts
+build/
+bin/
+CMakeFiles/
+*.db
+*.log
+logs/
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Temp / cursor files
+cursor_*.txt
+
+# Docker files themselves (not needed in build context)
+.dockerignore
+docker-compose.yml
+nginx.conf
+
+# Docs
+README.md
+ARCHITECTURE.md
+
+# Not needed for server build
+third/imgui/

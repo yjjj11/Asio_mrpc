@@ -8,26 +8,26 @@
 #include <cstdint>
 #include <ctime>
 #include <asio/signal_set.hpp>
-#include "sqlsave.hpp"
+#include "mysql_save.hpp"
 
 using namespace mrpc;
 
-SqliteSaver g_sqlite;
+MySqlSaver g_mysql;
 
 // ==================== 用户 RPC ====================
 
 bool svc_register_user(connection::cptr conn,
                        const std::string& username, const std::string& password) {
-    return g_sqlite.register_user(username, password);
+    return g_mysql.register_user(username, password);
 }
 
 bool svc_verify_user(connection::cptr conn,
                      const std::string& username, const std::string& password) {
-    return g_sqlite.verify_user(username, password);
+    return g_mysql.verify_user(username, password);
 }
 
 bool svc_user_exists(connection::cptr conn, const std::string& username) {
-    return g_sqlite.user_exists(username);
+    return g_mysql.user_exists(username);
 }
 
 // ==================== 消息持久化 RPC ====================
@@ -38,14 +38,14 @@ void svc_save_messages(connection::cptr conn,
     msg_objs.reserve(msgs.size());
     for (auto& [sid, f, t, m, ts] : msgs)
         msg_objs.push_back({sid, f, t, m, ts});
-    g_sqlite.save(msg_objs);
+    g_mysql.save(msg_objs);
 }
 
 auto svc_load_messages(connection::cptr conn,
                        const std::string& user_a, const std::string& user_b,
                        uint64_t before_seq_id, size_t max_count)
     -> std::vector<std::tuple<uint64_t, std::string, std::string, std::string, std::string>> {
-    auto msgs = g_sqlite.load(user_a, user_b, before_seq_id, max_count);
+    auto msgs = g_mysql.load(user_a, user_b, before_seq_id, max_count);
     std::vector<std::tuple<uint64_t, std::string, std::string, std::string, std::string>> result;
     result.reserve(msgs.size());
     for (auto& m : msgs)
@@ -57,7 +57,7 @@ auto svc_load_messages_after(connection::cptr conn,
                              const std::string& user_a, const std::string& user_b,
                              uint64_t after_seq_id, size_t max_count)
     -> std::vector<std::tuple<uint64_t, std::string, std::string, std::string, std::string>> {
-    auto msgs = g_sqlite.load_after(user_a, user_b, after_seq_id, max_count);
+    auto msgs = g_mysql.load_after(user_a, user_b, after_seq_id, max_count);
     std::vector<std::tuple<uint64_t, std::string, std::string, std::string, std::string>> result;
     result.reserve(msgs.size());
     for (auto& m : msgs)
@@ -69,7 +69,7 @@ auto svc_load_latest_messages(connection::cptr conn,
                               const std::string& user_a, const std::string& user_b,
                               size_t max_count)
     -> std::vector<std::tuple<uint64_t, std::string, std::string, std::string, std::string>> {
-    auto msgs = g_sqlite.load_latest(user_a, user_b, max_count);
+    auto msgs = g_mysql.load_latest(user_a, user_b, max_count);
     std::vector<std::tuple<uint64_t, std::string, std::string, std::string, std::string>> result;
     result.reserve(msgs.size());
     for (auto& m : msgs)
@@ -81,17 +81,17 @@ auto svc_load_latest_messages(connection::cptr conn,
 
 auto svc_search_users(connection::cptr conn, const std::string& keyword, const std::string& self)
     -> std::vector<std::string> {
-    return g_sqlite.search_users(keyword, self);
+    return g_mysql.search_users(keyword, self);
 }
 
 bool svc_send_friend_request(connection::cptr conn,
                              const std::string& from_user, const std::string& to_user) {
-    return g_sqlite.send_friend_request(from_user, to_user);
+    return g_mysql.send_friend_request(from_user, to_user);
 }
 
 auto svc_get_pending_requests(connection::cptr conn, const std::string& username)
     -> std::vector<std::tuple<int, std::string, int64_t>> {
-    auto reqs = g_sqlite.get_pending_requests(username);
+    auto reqs = g_mysql.get_pending_requests(username);
     std::vector<std::tuple<int, std::string, int64_t>> result;
     result.reserve(reqs.size());
     for (auto& r : reqs)
@@ -101,7 +101,7 @@ auto svc_get_pending_requests(connection::cptr conn, const std::string& username
 
 auto svc_get_sent_requests(connection::cptr conn, const std::string& username)
     -> std::vector<std::tuple<int, std::string, int64_t>> {
-    auto reqs = g_sqlite.get_sent_requests(username);
+    auto reqs = g_mysql.get_sent_requests(username);
     std::vector<std::tuple<int, std::string, int64_t>> result;
     result.reserve(reqs.size());
     for (auto& r : reqs)
@@ -112,25 +112,16 @@ auto svc_get_sent_requests(connection::cptr conn, const std::string& username)
 /// 处理好友请求，返回 (success, from_user, to_user) 供 server_node 做推送路由
 auto svc_handle_friend_request(connection::cptr conn, int request_id, bool accept)
     -> std::tuple<bool, std::string, std::string> {
-    using namespace sqlite_orm;
-    // 先查请求信息
-    FriendRequest req;
-    {
-        auto& st = g_sqlite.get_storage();
-        auto reqs = st.get_all<FriendRequest>(
-            where(c(&FriendRequest::id) == request_id)
-        );
-        if (reqs.empty()) return {false, "", ""};
-        req = reqs[0];
-    }
-    bool ok = g_sqlite.handle_friend_request(request_id, accept);
+    auto req_opt = g_mysql.get_friend_request(request_id);
+    if (!req_opt.has_value()) return {false, "", ""};
+    bool ok = g_mysql.handle_friend_request(request_id, accept);
     if (!ok) return {false, "", ""};
-    return {true, req.from_user, req.to_user};
+    return {true, req_opt->from_user, req_opt->to_user};
 }
 
 auto svc_get_friends(connection::cptr conn, const std::string& username)
     -> std::vector<std::string> {
-    return g_sqlite.get_friends(username);
+    return g_mysql.get_friends(username);
 }
 
 // ==================== 扩展 RPC（SQLite 唯一数据源查询） ====================
@@ -141,23 +132,7 @@ auto svc_get_unread_info_v2(connection::cptr conn,
                             const std::string& username,
                             const std::vector<std::string>& partners)
     -> std::vector<std::tuple<std::string, uint64_t, std::string>> {
-    using namespace sqlite_orm;
-    auto& st = g_sqlite.get_storage();
-    std::vector<std::tuple<std::string, uint64_t, std::string>> result;
-    for (const auto& p : partners) {
-        auto rows = st.get_all<Message>(
-            where(
-                (c(&Message::from_user) == username && c(&Message::to_user) == p) ||
-                (c(&Message::from_user) == p && c(&Message::to_user) == username)
-            ),
-            order_by(&Message::seq_id).desc(),
-            limit(1)
-        );
-        if (!rows.empty()) {
-            result.emplace_back(p, rows[0].seq_id, rows[0].from_user);
-        }
-    }
-    return result;
+    return g_mysql.get_unread_info(username, partners);
 }
 
 // ==================== main ====================
@@ -172,11 +147,15 @@ int main(int argc, char* argv[]) {
     svr.set_ip_port("0.0.0.0", port);
     svr.run();
 
-    if (!g_sqlite.init("chat_history.db")) {
-        LOG_ERROR("SQLite 初始化失败");
+    const char* mysql_host = std::getenv("MYSQL_HOST") ?: "127.0.0.1";
+    const char* mysql_user = std::getenv("MYSQL_USER") ?: "chat_user";
+    const char* mysql_pass = std::getenv("MYSQL_PASS") ?: "chat_pass";
+    const char* mysql_db   = std::getenv("MYSQL_DB")   ?: "chat";
+    if (!g_mysql.init(mysql_host, 3306, mysql_user, mysql_pass, mysql_db, 0)) {
+        LOG_ERROR("MySQL 初始化失败");
         return 1;
     }
-    LOG_INFO("SQLite 服务启动成功，数据库: chat_history.db");
+    LOG_INFO("MySQL 服务启动成功，数据库: {}", mysql_db);
 
     // 注册 RPC
     svr.reg_func("register_user",        svc_register_user);

@@ -18,6 +18,9 @@
 #include <asio/signal_set.hpp>
 #include <hiredis/hiredis.h>
 #include "redis_inbox.hpp"
+#include "mysql_save.hpp"
+#include "batch_saver.hpp"
+#include "snowflake.hpp"
 
 using namespace mrpc;
 
@@ -41,9 +44,24 @@ std::mutex g_redis_mutex;
 RedisInbox g_inbox;
 std::shared_ptr<connection> g_sqlite_conn;
 
+// ==================== 直连 MySQL（批量写） ====================
+MySqlSaver g_mysql;
+MessageBatchSaver g_batch_saver;
+
+// ==================== Snowflake ID 生成器（在 main 中初始化） ====================
+std::unique_ptr<Snowflake> g_snowflake;
+
+// ==================== 本地 user_location 缓存（避免每次发消息查 Redis） ====================
+std::unordered_map<std::string, std::string> g_location_cache;
+std::shared_mutex g_location_mutex;
+
 // ==================== 连接追踪（优雅关闭用） ====================
 std::vector<std::shared_ptr<connection>> g_all_connections;
 std::mutex g_all_conn_mutex;
+
+// Docker 容器化：从环境变量读取服务地址，有 env 则用否则保持原默认值
+std::string g_redis_host = "127.0.0.1";
+int g_redis_port = 6379;
 
 // ==================== 辅助函数 ====================
 
@@ -71,14 +89,12 @@ static void connect_peer(const std::string& node_id, const std::string& host, ui
 
 bool handle_register_user(connection::cptr conn,
                           const std::string& username, const std::string& password) {
-    auto ret = g_sqlite_conn->call<bool>("register_user", username, password);
-    return ret.error_code() == 200 && ret.value();
+    return g_mysql.register_user(username, password);
 }
 
 std::string handle_user_login(connection::cptr conn,
                               const std::string& username, const std::string& password) {
-    auto ret = g_sqlite_conn->call<bool>("verify_user", username, password);
-    if (ret.error_code() != 200 || !ret.value()) {
+    if (!g_mysql.verify_user(username, password)) {
         LOG_WARN("用户 {} 登录失败：密码错误或用户不存在", username);
         return {};
     }
@@ -143,29 +159,13 @@ uint64_t handle_send_message(connection::cptr conn,
                              const std::string& from_user,
                              const std::string& to_user,
                              const std::string& message) {
-    // 检查目标用户是否存在
-    auto exists_ret = g_sqlite_conn->call<bool>("user_exists", to_user);
-    if (exists_ret.error_code() != 200 || !exists_ret.value()) {
-        LOG_WARN("发送消息给不存在的用户: {} -> {}", from_user, to_user);
-        return 0;
-    }
-
-    // Per-conversation Seq ID
-    uint64_t seq_id = g_inbox.seq_id(from_user, to_user);
-    if (seq_id == 0) {
-        LOG_ERROR("Redis seq_id 失败，消息丢失: {} -> {}", from_user, to_user);
-        return 0;
-    }
+    // Snowflake 全局唯一 ID（本地生成，无需 Redis）
+    uint64_t seq_id = g_snowflake->next_id();
 
     std::string timestamp = std::to_string(std::time(nullptr));
 
-    // 异步写入 SQLite（所有消息直接持久化，不再经过 Redis conv ZSET）
-    {
-        using MsgTuple = std::tuple<uint64_t, std::string, std::string, std::string, std::string>;
-        std::vector<MsgTuple> msgs;
-        msgs.emplace_back(seq_id, from_user, to_user, message, timestamp);
-        g_sqlite_conn->notify("save_messages", msgs);
-    }
+    // 批量写入 MySQL（攒批后异步 flush，减少 DB 写入次数）
+    g_batch_saver.push(Message{seq_id, from_user, to_user, message, timestamp});
 
     // 路由投递
     deliver_message(from_user, to_user, message, seq_id, timestamp);
@@ -328,6 +328,11 @@ static void mark_user_online(const std::string& username, std::shared_ptr<connec
         std::unique_lock lock(g_local_mutex);
         g_local_users[username] = std::move(conn);
     }
+    // 本地缓存
+    {
+        std::unique_lock lock(g_location_mutex);
+        g_location_cache[username] = g_node_id;
+    }
     {
         std::lock_guard rlk(g_redis_mutex);
         redisCommand(g_redis, "SADD global:online_users %s", username.c_str());
@@ -340,6 +345,11 @@ static void mark_user_offline(const std::string& username) {
     {
         std::unique_lock lock(g_local_mutex);
         g_local_users.erase(username);
+    }
+    // 清除本地缓存
+    {
+        std::unique_lock lock(g_location_mutex);
+        g_location_cache.erase(username);
     }
     {
         std::lock_guard rlk(g_redis_mutex);
@@ -364,12 +374,33 @@ static void deliver_message(const std::string& from, const std::string& to,
         }
     }
 
-    // 2. Redis 路由到目标节点
+    // 2. 查本地缓存（避免 Redis HGET）
+    {
+        std::shared_lock lock(g_location_mutex);
+        auto it = g_location_cache.find(to);
+        if (it != g_location_cache.end()) {
+            std::string target_node = it->second;
+            lock.unlock();
+            std::lock_guard plk(g_peer_mutex);
+            auto pit = g_peer_conns.find(target_node);
+            if (pit != g_peer_conns.end()) {
+                pit->second->async_call([](uint32_t, const std::string&, const nlohmann::json&){},
+                                        "remote_deliver", to, from, msg, seq_id, ts);
+            }
+            return;
+        }
+    }
+
+    // 3. 缓存 miss → Redis 路由（并回填缓存）
     std::lock_guard rlk(g_redis_mutex);
     redisReply* reply = (redisReply*)redisCommand(g_redis, "HGET user_location %s", to.c_str());
     if (reply && reply->type == REDIS_REPLY_STRING) {
         std::string target_node = reply->str;
         freeReplyObject(reply);
+        {
+            std::unique_lock wlock(g_location_mutex);
+            g_location_cache[to] = target_node;
+        }
         std::lock_guard plk(g_peer_mutex);
         auto pit = g_peer_conns.find(target_node);
         if (pit != g_peer_conns.end()) {
@@ -395,12 +426,33 @@ static void deliver_notification(const std::string& target_user, const std::stri
         }
     }
 
-    // 2. Redis 路由
+    // 2. 查本地缓存
+    {
+        std::shared_lock lock(g_location_mutex);
+        auto it = g_location_cache.find(target_user);
+        if (it != g_location_cache.end()) {
+            std::string target_node = it->second;
+            lock.unlock();
+            std::lock_guard plk(g_peer_mutex);
+            auto pit = g_peer_conns.find(target_node);
+            if (pit != g_peer_conns.end()) {
+                pit->second->async_call([](uint32_t, const std::string&, const nlohmann::json&){},
+                                        "remote_notify", target_user, event, payload);
+            }
+            return;
+        }
+    }
+
+    // 3. 缓存 miss → Redis 路由（并回填缓存）
     std::lock_guard rlk(g_redis_mutex);
     redisReply* reply = (redisReply*)redisCommand(g_redis, "HGET user_location %s", target_user.c_str());
     if (reply && reply->type == REDIS_REPLY_STRING) {
         std::string target_node = reply->str;
         freeReplyObject(reply);
+        {
+            std::unique_lock wlock(g_location_mutex);
+            g_location_cache[target_user] = target_node;
+        }
         std::lock_guard plk(g_peer_mutex);
         auto pit = g_peer_conns.find(target_node);
         if (pit != g_peer_conns.end()) {
@@ -428,7 +480,7 @@ static void subscribe_loop() {
             if (reply) freeReplyObject(reply);
             std::this_thread::sleep_for(std::chrono::seconds(1));
             redisFree(g_sub_ctx);
-            g_sub_ctx = redisConnect("127.0.0.1", 6379);
+            g_sub_ctx = redisConnect(g_redis_host.c_str(), g_redis_port);
             if (g_sub_ctx) {
                 redisReply* r = (redisReply*)redisCommand(g_sub_ctx, "SUBSCRIBE user_status group_chat cluster:node_join");
                 if (r) freeReplyObject(r);
@@ -449,6 +501,12 @@ static void subscribe_loop() {
             if (colon == std::string::npos) { freeReplyObject(reply); continue; }
             std::string username = payload.substr(0, colon);
             std::string status = payload.substr(colon + 1); // "online" / "offline"
+
+            // 更新本地缓存
+            if (status == "offline") {
+                std::unique_lock lock(g_location_mutex);
+                g_location_cache.erase(username);
+            }
 
             // 无论本地/远端，主动推送状态变更给本节点所有客户端
             {
@@ -513,6 +571,7 @@ int main(int argc, char* argv[]) {
     }
 
     g_node_id = argv[1];
+    g_snowflake = std::make_unique<Snowflake>(g_node_id);
     uint16_t port = static_cast<uint16_t>(std::stoi(argv[2]));
 
     wlog::logger::get().init("logs/server_node_" + g_node_id + ".log");
@@ -522,21 +581,28 @@ int main(int argc, char* argv[]) {
     svr.run();
 
     // ---- 连接 Redis ----
-    g_redis = redisConnect("127.0.0.1", 6379);
+    {
+        const char* env_host = std::getenv("REDIS_HOST");
+        const char* env_port = std::getenv("REDIS_PORT");
+        if (env_host) g_redis_host = env_host;
+        if (env_port) g_redis_port = std::stoi(env_port);
+        LOG_INFO("Redis 目标: {}:{}", g_redis_host, g_redis_port);
+    }
+    g_redis = redisConnect(g_redis_host.c_str(), g_redis_port);
     if (!g_redis || g_redis->err) {
-        LOG_ERROR("Redis 连接失败");
+        LOG_ERROR("Redis 连接失败 ({}:{})", g_redis_host, g_redis_port);
         return 1;
     }
 
-    g_sub_ctx = redisConnect("127.0.0.1", 6379);
+    g_sub_ctx = redisConnect(g_redis_host.c_str(), g_redis_port);
     if (!g_sub_ctx || g_sub_ctx->err) {
-        LOG_ERROR("Redis 订阅连接失败");
+        LOG_ERROR("Redis 订阅连接失败 ({}:{})", g_redis_host, g_redis_port);
         return 1;
     }
 
     // ---- 初始化 RedisInbox ----
-    if (!g_inbox.connect()) {
-        LOG_ERROR("RedisInbox 连接失败 (127.0.0.1:6379)");
+    if (!g_inbox.connect(g_redis_host, g_redis_port)) {
+        LOG_ERROR("RedisInbox 连接失败 ({}:{})", g_redis_host, g_redis_port);
         return 1;
     }
 
@@ -544,27 +610,55 @@ int main(int argc, char* argv[]) {
     auto& client = mrpc::client::get();
     client.run();
 
-    // ---- 注册 RPC ----
-    svr.reg_func("register_user",          handle_register_user);
-    svr.reg_func("user_login",             handle_user_login);
-    svr.reg_func("token_login",            handle_token_login);
-    svr.reg_func("user_logout",            handle_user_logout);
-    svr.reg_func("get_online_users",       handle_get_online_users);
-    svr.reg_func("send_message",           handle_send_message);
-    svr.reg_func("send_group_message",     handle_send_group_message);
-    svr.reg_func("sync_messages",          handle_sync_messages);
-    svr.reg_func("sync_history",           handle_sync_history);
-    svr.reg_func("get_unread_info",        handle_get_unread_info);
-    svr.reg_func("search_users",           handle_search_users);
-    svr.reg_func("send_friend_request",    handle_send_friend_request);
-    svr.reg_func("get_pending_requests",   handle_get_pending_requests);
-    svr.reg_func("get_sent_requests",      handle_get_sent_requests);
-    svr.reg_func("handle_friend_request",  handle_handle_friend_request);
-    svr.reg_func("get_friends",            handle_get_friends);
+    // ---- 直连 MySQL（批量写入，绕开 sqlite_service RPC）----
+    {
+        const char* mysql_host = std::getenv("MYSQL_HOST") ?: "127.0.0.1";
+        const char* mysql_user = std::getenv("MYSQL_USER") ?: "chat_user";
+        const char* mysql_pass = std::getenv("MYSQL_PASS") ?: "chat_pass";
+        const char* mysql_db   = std::getenv("MYSQL_DB")   ?: "chat";
+        if (!g_mysql.init(mysql_host, 3306, mysql_user, mysql_pass, mysql_db, 0)) {
+            LOG_ERROR("server_node MySQL 初始化失败");
+            return 1;
+        }
+        LOG_INFO("server_node 已直连 MySQL ({})", mysql_db);
+        LOG_INFO("DEBUG: batch_saver 准备启动");
+        try {
+            g_batch_saver.start(&g_mysql);
+            LOG_INFO("DEBUG: batch_saver 启动成功");
+        } catch (const std::system_error& e) {
+            LOG_ERROR("DEBUG: batch_saver 启动失败: {} code: {}", e.what(), e.code().value());
+            return 1;
+        }
+    }
 
-    // 内部 RPC（其他节点调用）
-    svr.reg_func("remote_deliver",         remote_deliver);
-    svr.reg_func("remote_notify",          remote_notify);
+    // ---- 注册 RPC ----
+    LOG_INFO("DEBUG: 开始注册 RPC");
+    try {
+        svr.reg_func("register_user",          handle_register_user);
+        svr.reg_func("user_login",             handle_user_login);
+        svr.reg_func("token_login",            handle_token_login);
+        svr.reg_func("user_logout",            handle_user_logout);
+        svr.reg_func("get_online_users",       handle_get_online_users);
+        svr.reg_func("send_message",           handle_send_message);
+        svr.reg_func("send_group_message",     handle_send_group_message);
+        svr.reg_func("sync_messages",          handle_sync_messages);
+        svr.reg_func("sync_history",           handle_sync_history);
+        svr.reg_func("get_unread_info",        handle_get_unread_info);
+        svr.reg_func("search_users",           handle_search_users);
+        svr.reg_func("send_friend_request",    handle_send_friend_request);
+        svr.reg_func("get_pending_requests",   handle_get_pending_requests);
+        svr.reg_func("get_sent_requests",      handle_get_sent_requests);
+        svr.reg_func("handle_friend_request",  handle_handle_friend_request);
+        svr.reg_func("get_friends",            handle_get_friends);
+
+        // 内部 RPC（其他节点调用）
+        svr.reg_func("remote_deliver",         remote_deliver);
+        svr.reg_func("remote_notify",          remote_notify);
+        LOG_INFO("DEBUG: RPC 注册完成");
+    } catch (const std::exception& e) {
+        LOG_ERROR("DEBUG: RPC 注册异常: {}", e.what());
+        return 1;
+    }
 
     // ---- 新连接回调 ----
     svr.set_on_accept_callback([](std::shared_ptr<connection> conn) {
@@ -587,6 +681,11 @@ int main(int argc, char* argv[]) {
             }
 
             if (!username.empty()) {
+                // 清除本地缓存
+                {
+                    std::unique_lock lock(g_location_mutex);
+                    g_location_cache.erase(username);
+                }
                 {
                     std::lock_guard rlk(g_redis_mutex);
                     redisCommand(g_redis, "SREM global:online_users %s", username.c_str());
@@ -605,27 +704,51 @@ int main(int argc, char* argv[]) {
     });
 
     // ---- 连接 SQLite Service（必须在 accept 之前，否则客户端连进来时 handler 会访问空指针）----
-    g_sqlite_conn = client.connect("127.0.0.1", 7777);
-    if (!g_sqlite_conn) {
-        LOG_ERROR("SQLite Service 连接失败 (127.0.0.1:7777)");
+    LOG_INFO("DEBUG: 准备连接 SQLite Service");
+    try {
+        const char* sqlite_host = std::getenv("SQLITE_HOST") ?: "127.0.0.1";
+        int sqlite_port = std::getenv("SQLITE_PORT") ? std::stoi(std::getenv("SQLITE_PORT")) : 7777;
+        g_sqlite_conn = client.connect(sqlite_host, sqlite_port);
+        if (!g_sqlite_conn) {
+            LOG_ERROR("SQLite Service 连接失败 ({}:{})", sqlite_host, sqlite_port);
+            return 1;
+        }
+        LOG_INFO("DEBUG: SQLite Service 连接成功");
+    } catch (const std::exception& e) {
+        LOG_ERROR("DEBUG: SQLite 连接异常: {}", e.what());
         return 1;
     }
-    LOG_INFO("已连接 SQLite Service (127.0.0.1:7777)");
+    LOG_INFO("已连接 SQLite Service");
 
-    if (!svr.accept()) {
-        LOG_ERROR("Server Node 启动失败，端口 {} 被占用", port);
-        svr.shutdown();
+    LOG_INFO("DEBUG: 准备 accept");
+    try {
+        if (!svr.accept()) {
+            LOG_ERROR("Server Node 启动失败，端口 {} 被占用", port);
+            svr.shutdown();
+            return 1;
+        }
+        LOG_INFO("DEBUG: accept 成功");
+    } catch (const std::exception& e) {
+        LOG_ERROR("DEBUG: accept 异常: {}", e.what());
         return 1;
     }
 
     LOG_INFO("Server Node {} 启动成功，监听端口: {}", g_node_id, port);
 
     // ---- 启动 Pub/Sub 订阅线程（accept 后启动，确保 handler 已就绪）----
-    std::thread pubsub_thread(subscribe_loop);
-    pubsub_thread.detach();
+    LOG_INFO("DEBUG: 启动 pubsub 线程");
+    try {
+        std::thread pubsub_thread(subscribe_loop);
+        pubsub_thread.detach();
+        LOG_INFO("DEBUG: pubsub 线程启动成功");
+    } catch (const std::exception& e) {
+        LOG_ERROR("DEBUG: pubsub 线程异常: {}", e.what());
+        return 1;
+    }
 
     // ---- 自动注册：发现已有节点 + 宣告自己 ----
-    {
+    LOG_INFO("DEBUG: 开始节点注册");
+    try {
         redisReply* reply = (redisReply*)redisCommand(g_redis, "HGETALL cluster:nodes");
         if (reply && reply->type == REDIS_REPLY_ARRAY) {
             for (size_t i = 0; i + 1 < reply->elements; i += 2) {
@@ -641,10 +764,14 @@ int main(int argc, char* argv[]) {
         }
         if (reply) freeReplyObject(reply);
 
-        std::string self_addr = "127.0.0.1:" + std::to_string(port);
+        std::string self_addr = std::string(std::getenv("NODE_HOST") ?: "127.0.0.1") + ":" + std::to_string(port);
         redisCommand(g_redis, "HSET cluster:nodes %s %s", g_node_id.c_str(), self_addr.c_str());
         redisCommand(g_redis, "PUBLISH cluster:node_join %s=%s", g_node_id.c_str(), self_addr.c_str());
         LOG_INFO("已注册到集群: {} = {}", g_node_id, self_addr);
+        LOG_INFO("DEBUG: 节点注册完成");
+    } catch (const std::exception& e) {
+        LOG_ERROR("DEBUG: 节点注册异常: {}", e.what());
+        return 1;
     }
 
     // ---- 信号处理 ----
@@ -661,6 +788,8 @@ int main(int argc, char* argv[]) {
                 c->notify("on_server_shutdown");
             }
         }
+        // Final flush 所有积压消息
+        g_batch_saver.stop();
         auto timer = std::make_shared<asio::steady_timer>(svr.main_iocontext());
         timer->expires_after(std::chrono::milliseconds(200));
         timer->async_wait([&, timer](std::error_code) {

@@ -53,3 +53,44 @@ target_include_directories(chat_server PRIVATE ${CMAKE_HOME_DIRECTORY}/chatting_
 target_link_libraries(chat_server PRIVATE hiredis sqlite3)
 # 聊天室客户端
 add_executable(chat_client ${CMAKE_HOME_DIRECTORY}/chatting_room/client.cpp)
+
+# ImGui + SDL2 桌面 GUI 客户端
+find_package(SDL2 REQUIRED)
+find_package(OpenGL REQUIRED)
+file(GLOB IMGUI_SOURCES ${CMAKE_HOME_DIRECTORY}/third/imgui/imgui.cpp
+    ${CMAKE_HOME_DIRECTORY}/third/imgui/imgui_draw.cpp
+    ${CMAKE_HOME_DIRECTORY}/third/imgui/imgui_tables.cpp
+    ${CMAKE_HOME_DIRECTORY}/third/imgui/imgui_widgets.cpp
+    ${CMAKE_HOME_DIRECTORY}/third/imgui/imgui_impl_sdl2.cpp
+    ${CMAKE_HOME_DIRECTORY}/third/imgui/imgui_impl_opengl3.cpp
+)
+add_executable(chat_gui
+    ${CMAKE_HOME_DIRECTORY}/chatting_room/client_gui.cpp
+    ${IMGUI_SOURCES}
+)
+target_include_directories(chat_gui PRIVATE
+    ${CMAKE_HOME_DIRECTORY}/chatting_room
+    ${CMAKE_HOME_DIRECTORY}/third/imgui
+)
+target_link_libraries(chat_gui PRIVATE
+    SDL2::SDL2
+    OpenGL::GL
+)
+
+# 分布式服务节点（直连 Redis，水平可扩展）
+add_executable(server_node ${CMAKE_HOME_DIRECTORY}/chatting_room/server_node.cpp)
+target_include_directories(server_node PRIVATE ${CMAKE_HOME_DIRECTORY}/chatting_room)
+target_link_libraries(server_node PRIVATE hiredis sqlite3 mysqlclient)
+
+# 持久化服务（独立进程，各 server_node 通过 mRPC 调用）
+add_executable(sqlite_service ${CMAKE_HOME_DIRECTORY}/chatting_room/sqlite_service.cpp)
+target_include_directories(sqlite_service PRIVATE ${CMAKE_HOME_DIRECTORY}/chatting_room)
+target_link_libraries(sqlite_service PRIVATE hiredis mysqlclient)
+
+# Echo 服务（用于压力测试纯 RPC 吞吐）
+add_executable(echo_server ${CMAKE_HOME_DIRECTORY}/chatting_room/echo_server.cpp)
+target_include_directories(echo_server PRIVATE ${CMAKE_HOME_DIRECTORY}/chatting_room)
+
+# 压力测试
+add_executable(stress_test ${CMAKE_HOME_DIRECTORY}/chatting_room/stress_test.cpp)
+target_include_directories(stress_test PRIVATE ${CMAKE_HOME_DIRECTORY}/chatting_room)

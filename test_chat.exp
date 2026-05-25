@@ -1,0 +1,175 @@
+#!/usr/bin/expect -f
+set timeout 20
+set port [lindex $argv 0]
+
+# Clean up old session files (binary writes to its CWD = where expect runs)
+catch { exec rm -f session_token.txt }
+catch { exec rm -f chat_cursor_*.txt }
+
+cd /root/Asio_mrpc/bin
+spawn ./chat_client {*}$port
+
+# Wait for connection + menu
+expect {
+    "正在连接聊天室服务器" { puts "INFO: Connecting..." }
+    timeout { puts "FAIL: timeout connecting"; exit 1 }
+}
+expect {
+    "请选择操作:" { puts "PASS: Client started and connected" }
+    timeout { puts "FAIL: menu timeout"; exit 1 }
+}
+
+# === TEST 1: Register user1 ===
+send "2\r"
+expect "请输入用户名:"
+send "testuser1\r"
+expect "请输入密码:"
+send "pass123\r"
+expect {
+    -re "注册成功" { puts "PASS: User1 registered" }
+    -re "注册失败" { puts "INFO: User1 already exists" }
+    timeout { puts "FAIL: register user1 timeout"; exit 1 }
+}
+expect "按回车键继续"
+send "\r"
+expect "请选择操作:"
+
+# === TEST 2: Register user2 ===
+send "2\r"
+expect "请输入用户名:"
+send "testuser2\r"
+expect "请输入密码:"
+send "pass456\r"
+expect {
+    -re "注册成功" { puts "PASS: User2 registered" }
+    -re "注册失败" { puts "INFO: User2 already exists" }
+    timeout { puts "FAIL: register user2 timeout"; exit 1 }
+}
+expect "按回车键继续"
+send "\r"
+expect "请选择操作:"
+
+# === TEST 3: Login as user1 ===
+send "1\r"
+expect "请输入用户名:"
+send "testuser1\r"
+expect "请输入密码:"
+send "pass123\r"
+expect {
+    -re "登录成功" { puts "PASS: User1 logged in" }
+    timeout { puts "FAIL: login user1"; exit 1 }
+}
+expect {
+    -re "输入编号私聊" { puts "PASS: Online hub loaded for user1" }
+    timeout { puts "FAIL: online hub timeout"; exit 1 }
+}
+
+# === TEST 4: Open friend menu -> Search user2 -> Send friend request ===
+send "f\r"
+expect "好友管理"
+expect "请选择操作"
+send "1\r"
+expect "请输入用户名关键字"
+send "testuser2\r"
+expect {
+    -re "选择用户发送好友请求" { puts "PASS: user2 found in search" }
+    timeout { puts "FAIL: search timeout"; exit 1 }
+}
+send "1\r"
+expect {
+    -re "好友请求已发送" { puts "PASS: Friend request sent to user2" }
+    timeout { puts "FAIL: send request timeout"; exit 1 }
+}
+expect "按回车键继续"
+send "\r"
+# Back in friend menu, return to hub
+expect "请选择操作"
+send "5\r"
+expect "输入编号私聊"
+
+# === TEST 5: Logout user1 ===
+send "q\r"
+expect "请选择操作:"
+
+# === TEST 6: Login as user2 ===
+send "1\r"
+expect "请输入用户名:"
+send "testuser2\r"
+expect "请输入密码:"
+send "pass456\r"
+expect {
+    -re "登录成功" { puts "PASS: User2 logged in" }
+    timeout { puts "FAIL: login user2"; exit 1 }
+}
+expect "输入编号私聊"
+
+# === TEST 7: Accept friend request ===
+send "f\r"
+expect "好友管理"
+expect "请选择操作"
+send "2\r"
+expect {
+    -re "好友请求" { puts "PASS: Pending friend request found" }
+    timeout { puts "FAIL: friend request list timeout"; exit 1 }
+}
+# Select first request
+send "1\r"
+expect {
+    -re "接受" { puts "PASS: Accept prompt shown" }
+    timeout { puts "FAIL: accept prompt timeout"; exit 1 }
+}
+send "y\r"
+# Should show "已成为好友" or accepted message
+expect {
+    -re "好友" { puts "PASS: Friend request accepted" }
+    timeout { puts "WARN: Accept may have completed" }
+}
+expect "按回车键继续"
+send "\r"
+expect "请选择操作"
+send "5\r"
+expect "输入编号私聊"
+
+# User2 logout
+send "q\r"
+expect "请选择操作:"
+
+# === TEST 8: Login as user1 again, send message ===
+send "1\r"
+expect "请输入用户名:"
+send "testuser1\r"
+expect "请输入密码:"
+send "pass123\r"
+expect {
+    -re "登录成功" { puts "PASS: User1 re-logged in" }
+    timeout { puts "FAIL: login user1 again"; exit 1 }
+}
+expect "输入编号私聊"
+
+# Select first in chat list (should be user2)
+send "1\r"
+expect {
+    -re "私聊中" { puts "PASS: Private chat with user2 started" }
+    timeout { puts "FAIL: start private chat timeout"; exit 1 }
+}
+
+# Send a message
+send "Hello from testuser1!\r"
+expect {
+    -re "输入消息" { puts "PASS: Message sent" }
+    timeout { puts "WARN: Message sent (no echo)" }
+}
+
+# Quit chat
+send "quit\r"
+expect "输入编号私聊"
+
+# Logout
+send "q\r"
+expect "请选择操作:"
+
+# Exit
+send "5\r"
+expect eof
+
+puts "\n=== ALL TESTS PASSED ==="

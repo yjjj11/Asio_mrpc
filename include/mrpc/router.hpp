@@ -117,6 +117,13 @@ class router {
             json = nlohmann::json::from_msgpack(buffer);
         } else if (msg_type & (1 << MSG_FMT_CBOR)) {
             json = nlohmann::json::from_cbor(buffer);
+        } else if (msg_type & (1 << MSG_FMT_RAW)) {
+            // RAW: no nlohmann parsing — wrap raw bytes into expected array format
+            if (msg_type & (1 << MSG_IS_RESPONSE)) {
+                json = nlohmann::json::array_t{ 200, "ok", buffer };
+            } else {
+                json = nlohmann::json::array_t{ buffer };
+            }
         }
         return json;
     }

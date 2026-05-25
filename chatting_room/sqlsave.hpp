@@ -43,11 +43,12 @@ inline auto make_message_storage(const std::string& path) {
     using namespace sqlite_orm;
     return make_storage(path,
         make_table("messages",
-            make_column("seq_id", &Message::seq_id, primary_key()),
+            make_column("seq_id", &Message::seq_id),
             make_column("from_user", &Message::from_user),
             make_column("to_user", &Message::to_user),
             make_column("msg", &Message::msg),
-            make_column("created_at", &Message::created_at)
+            make_column("created_at", &Message::created_at),
+            primary_key(&Message::seq_id, &Message::from_user, &Message::to_user)
         ),
         make_table("users",
             make_column("username", &User::username, primary_key()),

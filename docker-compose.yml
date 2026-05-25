@@ -1,0 +1,189 @@
+services:
+  mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: root_pass
+      MYSQL_DATABASE: chat
+      MYSQL_USER: chat_user
+      MYSQL_PASSWORD: chat_pass
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-proot_pass"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+      start_period: 10s
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - chat-net
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - chat-net
+    restart: unless-stopped
+
+  sqlite-service:
+    build: .
+    entrypoint: ["/app/sqlite_service", "7777"]
+    environment:
+      MYSQL_HOST: mysql
+      MYSQL_USER: chat_user
+      MYSQL_PASS: chat_pass
+      MYSQL_DB: chat
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - chat-net
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "8877:8877"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - server-1
+      - server-2
+      - server-3
+      - server-4
+      - server-5
+    networks:
+      - chat-net
+    restart: unless-stopped
+
+  server-1:
+    build: .
+    ports:
+      - "8881:8881"
+    entrypoint: ["/app/server_node", "node-1", "8881"]
+    environment:
+      MYSQL_HOST: mysql
+      MYSQL_USER: chat_user
+      MYSQL_PASS: chat_pass
+      MYSQL_DB: chat
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      SQLITE_HOST: sqlite-service
+      SQLITE_PORT: "7777"
+      NODE_HOST: server-1
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      sqlite-service:
+        condition: service_started
+    networks:
+      - chat-net
+    restart: unless-stopped
+
+  server-2:
+    build: .
+    entrypoint: ["/app/server_node", "node-2", "8882"]
+    environment:
+      MYSQL_HOST: mysql
+      MYSQL_USER: chat_user
+      MYSQL_PASS: chat_pass
+      MYSQL_DB: chat
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      SQLITE_HOST: sqlite-service
+      SQLITE_PORT: "7777"
+      NODE_HOST: server-2
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      sqlite-service:
+        condition: service_started
+    networks:
+      - chat-net
+    restart: unless-stopped
+
+  server-3:
+    build: .
+    entrypoint: ["/app/server_node", "node-3", "8883"]
+    environment:
+      MYSQL_HOST: mysql
+      MYSQL_USER: chat_user
+      MYSQL_PASS: chat_pass
+      MYSQL_DB: chat
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      SQLITE_HOST: sqlite-service
+      SQLITE_PORT: "7777"
+      NODE_HOST: server-3
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      sqlite-service:
+        condition: service_started
+    networks:
+      - chat-net
+    restart: unless-stopped
+
+  server-4:
+    build: .
+    entrypoint: ["/app/server_node", "node-4", "8884"]
+    environment:
+      MYSQL_HOST: mysql
+      MYSQL_USER: chat_user
+      MYSQL_PASS: chat_pass
+      MYSQL_DB: chat
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      SQLITE_HOST: sqlite-service
+      SQLITE_PORT: "7777"
+      NODE_HOST: server-4
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      sqlite-service:
+        condition: service_started
+    networks:
+      - chat-net
+    restart: unless-stopped
+
+  server-5:
+    build: .
+    entrypoint: ["/app/server_node", "node-5", "8885"]
+    environment:
+      MYSQL_HOST: mysql
+      MYSQL_USER: chat_user
+      MYSQL_PASS: chat_pass
+      MYSQL_DB: chat
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      SQLITE_HOST: sqlite-service
+      SQLITE_PORT: "7777"
+      NODE_HOST: server-5
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      sqlite-service:
+        condition: service_started
+    networks:
+      - chat-net
+    restart: unless-stopped
+
+volumes:
+  mysql_data:
+
+networks:
+  chat-net:

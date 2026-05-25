@@ -147,7 +147,7 @@ class server final : private asio::noncopyable {
         }
         ++next_ioc_index_;
         if (next_ioc_index_ >= iocs_.size()) { 
-            next_ioc_index_ = io_count_; // the first io_context only for accept
+            next_ioc_index_ = 1; // the first io_context only for accept
         }
         return iocs_[next_ioc_index_];
 

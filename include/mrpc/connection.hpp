@@ -266,7 +266,7 @@ class connection : public std::enable_shared_from_this<connection> {
         //那他们的解析逻辑是否一样呢
     }
 
-    bool connect(const std::string& host, uint16_t port, time_t timeout = 3) {
+    bool connect(const std::string& host, uint16_t port, time_t timeout = 3000) {
         async_connect(host, port);
         return wait_conn(timeout);
     }
@@ -430,29 +430,41 @@ task_awaitable<RET> coro_call(const std::string& rpc_name, Args&&...args) {
 
   private:
     // connect
-    void async_connect() {//已经从外部接收ip和port并且设置到自己的成员变量上，然后异步连接到对端服务器
-        auto addr = asio::ip::address::from_string(host_);
-        socket_.async_connect(tcp::endpoint(addr, port_), [this](std::error_code ec) {
-            if (has_connected_ == true) {
-                return;
-            }
-             socket_.set_option(asio::ip::tcp::no_delay(true));  // 禁用 Nagle 算法
-                socket_.set_option(asio::socket_base::send_buffer_size(64 * 1024));  // 增大发送缓冲区
-                socket_.set_option(asio::socket_base::receive_buffer_size(64 * 1024));  // 增大接收缓冲区
-            if (ec) {
-                if (reconnect_cnt_ <= 0) {
-                    conn_cond_.notify_one();
-                    return;
-                } else {
+    void async_connect() {
+        auto self = shared_from_this();
+        auto resolver = std::make_shared<asio::ip::tcp::resolver>(socket_.get_executor());
+        resolver->async_resolve(host_, std::to_string(port_),
+            [this, self, resolver](const std::error_code& ec,
+                                   asio::ip::tcp::resolver::results_type endpoints) {
+                if (ec) {
+                    if (reconnect_cnt_ <= 0) {
+                        conn_cond_.notify_one();
+                        return;
+                    }
                     reconnect_cnt_--;
+                    async_reconnect();
+                    return;
                 }
-                async_reconnect(); //在可用重连次数内重连
-            } else {
-                has_connected_ = true;
-                conn_cond_.notify_one();
-                start();
-            }
-        });
+                asio::async_connect(socket_, endpoints,
+                    [this, self](std::error_code ec, asio::ip::tcp::endpoint) {
+                        if (has_connected_) return;
+                        socket_.set_option(asio::ip::tcp::no_delay(true));
+                        socket_.set_option(asio::socket_base::send_buffer_size(64 * 1024));
+                        socket_.set_option(asio::socket_base::receive_buffer_size(64 * 1024));
+                        if (ec) {
+                            if (reconnect_cnt_ <= 0) {
+                                conn_cond_.notify_one();
+                                return;
+                            }
+                            reconnect_cnt_--;
+                            async_reconnect();
+                        } else {
+                            has_connected_ = true;
+                            conn_cond_.notify_one();
+                            start();
+                        }
+                    });
+            });
     }
 
     void async_reconnect() {
@@ -491,7 +503,7 @@ task_awaitable<RET> coro_call(const std::string& rpc_name, Args&&...args) {
 
         has_wait_ = true;
         std::unique_lock<std::mutex> lock(conn_mtx_);
-        /*bool result = */conn_cond_.wait_for(lock, std::chrono::seconds(timeout),
+        /*bool result = */conn_cond_.wait_for(lock, std::chrono::milliseconds(timeout),
                                           [this] {return has_connected_.load(); });
         has_wait_ = false;
         return has_connected_;
@@ -584,6 +596,13 @@ task_awaitable<RET> coro_call(const std::string& rpc_name, Args&&...args) {
             nlohmann::json::to_msgpack(json, data);
         } else if (id.msg_type & (1 << MSG_FMT_CBOR)) {
             nlohmann::json::to_cbor(json, data);
+        } else if (id.msg_type & (1 << MSG_FMT_RAW)) {
+            // RAW: extract the string payload directly, no nlohmann serialization
+            if (json.is_string()) {
+                data = json.get<std::string>();
+            } else if (json.is_array() && json.size() > 0 && json.back().is_string()) {
+                data = json.back().get<std::string>();
+            }
         }
 		{
 			std::lock_guard<std::mutex> locker(write_mtx_);
