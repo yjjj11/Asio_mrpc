@@ -51,3 +51,5 @@ compile_commands.json
 logs/
 third/sqlite_orm/
 *.db
+node_modules/
+package-lock.json

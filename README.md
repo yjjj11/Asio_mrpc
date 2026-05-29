@@ -117,8 +117,8 @@ redis-server &
 ./bin/server_node node-4 8884 &
 ./bin/server_node node-5 8885 &
 
-# 4. 启动 Nginx 负载均衡（配置见 nginx.conf）
-nginx -c /path/to/nginx.conf
+# 4. 启动 Nginx 负载均衡（配置见 docker/nginx.conf）
+nginx -c /path/to/docker/nginx.conf
 
 # 5. 启动客户端（通过 Nginx 连接集群）
 ./bin/chat_client 127.0.0.1 8877
@@ -127,7 +127,7 @@ nginx -c /path/to/nginx.conf
 ### Docker 部署
 
 ```sh
-docker compose up -d
+cd docker && docker compose up -d
 # 服务端 8 个容器（mysql / redis / nginx / sqlite-service / 5×server_node）
 # 客户端通过宿主机 8877 端口连接
 ```
@@ -156,9 +156,14 @@ docker compose up -d
 │   ├── client.cpp             # 终端 CLI 客户端
 │   └── logger.hpp             # 日志配置
 ├── third/                     # 第三方依赖（header-only）
-├── Dockerfile                 # 多阶段构建
-├── docker-compose.yml         # 容器编排（5 节点集群）
-├── nginx.conf                 # Nginx Stream 配置
+├── docker/                    # Docker 容器化配置
+│   ├── Dockerfile             # 多阶段构建
+│   ├── docker-compose.yml     # 容器编排（5 节点集群）
+│   └── nginx.conf             # Nginx Stream 配置
+├── docs/                      # 文档
+│   ├── 面试FAQ.md             # 面试高频问题
+│   ├── 架构演变.md             # 架构演进历程
+│   └── ARCHITECTURE.md        # 原始架构设计
 ├── logs/                      # 运行日志
 └── bin/                       # 编译输出
 ```
@@ -188,4 +193,4 @@ mRPC 是项目自研的轻量级 C++ RPC 框架，核心特性：
 
 ## 面试 FAQ
 
-常见问题与深度解析见 [面试FAQ.md](面试FAQ.md)。
+常见问题与深度解析见 [面试FAQ.md](docs/面试FAQ.md)。
