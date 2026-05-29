@@ -31,7 +31,9 @@ services:
     restart: unless-stopped
 
   sqlite-service:
-    build: .
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
     entrypoint: ["/app/sqlite_service", "7777"]
     environment:
       MYSQL_HOST: mysql
@@ -46,7 +48,9 @@ services:
     restart: unless-stopped
 
   server-1:
-    build: .
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
     ports:
       - "8881:8881"
     entrypoint: ["/app/server_node", "node-1", "8881"]
